@@ -283,7 +283,7 @@ fn lead_best_fail(hand: &[Card], state: &GameState, bs: &BotState, game: &dyn Ga
     trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
     trump.into_iter().next().unwrap_or(hand[0])
 }
-fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, bs: &BotState, game: &dyn Game) -> Card {
+fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, _bs: &BotState, game: &dyn Game) -> Card {
     let is_picker = picker_seat(state) == Some(seat);
     let trick_pts = trick_points(trick, game);
     let winner_seat = current_winner(trick, game, state);
@@ -333,7 +333,8 @@ fn follow_as_defender(legal: &[Card], trick: &Trick, trick_pts: u8, picker_has_p
     }
 
     // Picker has not yet played — risk-weight
-    // High-value trick: worth playing min trump and accepting risk
+    // Higher threshold (14 vs 10) because picker still has an unknown response;
+    // require at least an Ace + some card value before risking trump into the unknown
     if trick_pts >= 14 {
         if let Some(t) = min_winning_trump(legal, trick, game, state) {
             return t;
@@ -355,7 +356,7 @@ fn lowest_card(cards: &[Card], game: &dyn Game, state: &GameState) -> Card {
         return c;
     }
     let mut trump: Vec<Card> = cards.to_vec();
-    trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap_or(0));
+    trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap_or(255));
     trump.into_iter().next().unwrap_or(cards[0])
 }
 
