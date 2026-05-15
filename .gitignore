@@ -1,0 +1,8 @@
+client/node_modules
+client/dist/
+client/.env
+client/.DS_Store
+client/.vscode/
+client/.idea/
+.fastembed_cache/
+server/target/
