@@ -6,6 +6,7 @@ import HandComponent from '@/components/HandComponent.vue'
 import type { Card } from '@/engine/types'
 
 const store = useGameStore()
+const { playerName } = store
 const { pick, pass, bury } = useGame()
 
 // Two sub-phases: picking (anyone can pick/pass) and burying (picker discards 2)
@@ -48,7 +49,7 @@ function submitBury() {
         </div>
       </div>
       <p v-else class="waiting-msg">
-        Waiting for player {{ store.gameState?.current_player }} to pick or pass…
+        Waiting for {{ playerName(store.gameState?.current_player ?? 0) }} to pick or pass…
       </p>
     </template>
 
@@ -74,7 +75,7 @@ function submitBury() {
         </button>
       </div>
       <p v-else class="waiting-msg">
-        Waiting for player {{ store.picker }} to bury…
+        Waiting for {{ playerName(store.picker ?? 0) }} to bury…
       </p>
     </template>
   </div>
