@@ -39,7 +39,7 @@ function submitBury() {
 </script>
 
 <template>
-  <div class="bidding-panel">
+  <div class="bidding-panel" :class="{ 'your-turn-glow': store.isMyTurn }">
     <!-- ── Picking sub-phase ────────────────────────────────────── -->
     <template v-if="isPickingPhase">
       <div v-if="isMyPickTurn" class="pick-prompt">
@@ -104,4 +104,14 @@ function submitBury() {
 
 .btn-bury { margin-top: 0.75rem; background: #7c3aed; }
 .btn-bury:hover:not(:disabled) { background: #6d28d9; }
+
+@keyframes your-turn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  50%       { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.35); }
+}
+.your-turn-glow {
+  outline: 2px solid rgba(34, 197, 94, 0.7);
+  outline-offset: 2px;
+  animation: your-turn-pulse 1.2s ease-in-out infinite;
+}
 </style>

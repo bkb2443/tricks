@@ -90,7 +90,7 @@ function trickOrdinal(n: number) {
     <bidding-panel v-if="state.phase === 'bidding'" />
 
     <!-- ── My hand ────────────────────────────────────────────── -->
-    <section v-if="state.phase !== 'scoring'" class="my-hand">
+    <section v-if="state.phase !== 'scoring'" class="my-hand" :class="{ 'your-turn-glow': canPlay }">
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
         <span v-if="store.isPicker" class="badge picker">Picker</span>
@@ -313,4 +313,15 @@ function trickOrdinal(n: number) {
 .history summary { cursor: pointer; }
 .history ol { margin: 0.5rem 0 0; padding-left: 1.2rem; }
 .history li { margin-bottom: 0.2rem; }
+
+/* Your-turn glow pulse */
+@keyframes your-turn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+  50%       { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.35); }
+}
+.your-turn-glow {
+  outline: 2px solid rgba(34, 197, 94, 0.7);
+  outline-offset: 2px;
+  animation: your-turn-pulse 1.2s ease-in-out infinite;
+}
 </style>
