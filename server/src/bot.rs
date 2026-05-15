@@ -154,7 +154,7 @@ pub fn play_card(state: &GameState, seat: usize, game: &dyn Game) -> Option<Card
         Some(trick) if trick.plays.is_empty() => Some(choose_lead(hand, seat, state, &bot_state, game)),
         Some(trick) => {
             let legal = game.legal_plays(hand, trick, state);
-            Some(choose_follow(&legal, seat, trick, state, &bot_state, game))
+            Some(choose_follow(&legal, seat, trick, state, game))
         }
     }
 }
@@ -188,7 +188,7 @@ fn choose_bury(hand: &[Card], state: &GameState, game: &dyn Game) -> Vec<Card> {
 
     if fail.len() >= 2 {
         // Sort by point value descending
-        fail.sort_by(|a, b| point_value(*b).cmp(&point_value(*a)));
+        fail.sort_by_key(|c| std::cmp::Reverse(point_value(*c)));
         let first = fail[0];
         // Prefer second card from same suit to create a void
         let same_suit: Vec<Card> = fail[1..].iter()
@@ -245,7 +245,7 @@ fn choose_lead(hand: &[Card], seat: usize, state: &GameState, bs: &BotState, gam
         .filter(|c| {
             c.rank == Rank::Ace
                 && game.trump_rank(**c, state).is_none()
-                && picker_voids.map_or(true, |v| !v.contains(&game.effective_suit(**c, state)))
+                && picker_voids.is_none_or(|v| !v.contains(&game.effective_suit(**c, state)))
         })
         .copied()
         .collect();
@@ -264,13 +264,10 @@ fn lead_best_fail(hand: &[Card], state: &GameState, bs: &BotState, game: &dyn Ga
         .collect();
 
     // Avoid leading into picker's known void (they'll trump in)
-    if let Some(p) = picker {
-        if let Some(voids) = bs.known_voids.get(&p) {
-            fail.retain(|c| !voids.contains(&game.effective_suit(*c, state)));
-        }
-    }
+    if let Some(p) = picker
+        && let Some(voids) = bs.known_voids.get(&p) { fail.retain(|c| !voids.contains(&game.effective_suit(*c, state))); }
 
-    fail.sort_by(|a, b| point_value(*b).cmp(&point_value(*a)));
+    fail.sort_by_key(|c| std::cmp::Reverse(point_value(*c)));
     if let Some(&c) = fail.first() {
         return c;
     }
@@ -283,7 +280,7 @@ fn lead_best_fail(hand: &[Card], state: &GameState, bs: &BotState, game: &dyn Ga
     trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
     trump.into_iter().next().unwrap_or(hand[0])
 }
-fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, _bs: &BotState, game: &dyn Game) -> Card {
+fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, game: &dyn Game) -> Card {
     let is_picker = picker_seat(state) == Some(seat);
     let trick_pts = trick_points(trick, game);
     let winner_seat = current_winner(trick, game, state);
@@ -292,8 +289,8 @@ fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, 
         follow_as_picker(legal, trick, trick_pts, winner_seat == seat, game, state)
     } else {
         let picker = picker_seat(state);
-        let picker_has_played = picker.map_or(true, |p| trick.plays.iter().any(|(s, _)| *s == p));
-        let picker_is_winning = picker.map_or(false, |p| winner_seat == p);
+        let picker_has_played = picker.is_none_or(|p| trick.plays.iter().any(|(s, _)| *s == p));
+        let picker_is_winning = picker.is_some_and(|p| winner_seat == p);
         follow_as_defender(legal, trick, trick_pts, picker_has_played, picker_is_winning, game, state)
     }
 }
@@ -305,12 +302,11 @@ fn follow_as_picker(legal: &[Card], trick: &Trick, trick_pts: u8, i_am_winning: 
     }
 
     // Currently losing
-    if trick_pts >= 10 {
-        // High-value trick — play min trump to recapture
-        if let Some(t) = min_winning_trump(legal, trick, game, state) {
+    // High-value trick — play min trump to recapture
+    if trick_pts >= 10
+        && let Some(t) = min_winning_trump(legal, trick, game, state) {
             return t;
         }
-    }
 
     // Low value or can't beat — throw lowest
     lowest_card(legal, game, state)
@@ -324,22 +320,20 @@ fn follow_as_defender(legal: &[Card], trick: &Trick, trick_pts: u8, picker_has_p
     }
 
     if picker_has_played && picker_is_winning {
-        if trick_pts >= 10 {
-            if let Some(t) = min_winning_trump(legal, trick, game, state) {
+        if trick_pts >= 10
+            && let Some(t) = min_winning_trump(legal, trick, game, state) {
                 return t;
             }
-        }
         return lowest_card(legal, game, state);
     }
 
     // Picker has not yet played — risk-weight
     // Higher threshold (14 vs 10) because picker still has an unknown response;
     // require at least an Ace + some card value before risking trump into the unknown
-    if trick_pts >= 14 {
-        if let Some(t) = min_winning_trump(legal, trick, game, state) {
+    if trick_pts >= 14
+        && let Some(t) = min_winning_trump(legal, trick, game, state) {
             return t;
         }
-    }
 
     // Low-value or can't win — throw lowest
     lowest_card(legal, game, state)
@@ -366,12 +360,12 @@ fn highest_point_card(cards: &[Card], game: &dyn Game, state: &GameState) -> Car
         .filter(|c| game.trump_rank(**c, state).is_none())
         .copied()
         .collect();
-    fail.sort_by(|a, b| point_value(*b).cmp(&point_value(*a)));
+    fail.sort_by_key(|c| std::cmp::Reverse(point_value(*c)));
     if let Some(&c) = fail.first() {
         return c;
     }
     let mut all = cards.to_vec();
-    all.sort_by(|a, b| point_value(*b).cmp(&point_value(*a)));
+    all.sort_by_key(|c| std::cmp::Reverse(point_value(*c)));
     all.into_iter().next().unwrap_or(cards[0])
 }
 
@@ -501,7 +495,6 @@ mod tests {
         // Trick has A♠(11pts) + 10♠(10pts) = 21pts; picker(0) is next, currently losing
         // Legal plays: J♥ (trump 8) and Q♣ (trump 14) — should play J♥ (minimum winning trump)
         let state = state_with_picker(0);
-        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
         let trick = trick_with_plays(vec![
             (1, Suit::Spades, Rank::Ace),
             (2, Suit::Spades, Rank::Ten),
@@ -510,7 +503,7 @@ mod tests {
             Card::new(Suit::Hearts, Rank::Jack), // J♥ trump strength 8
             Card::new(Suit::Clubs, Rank::Queen),  // Q♣ trump strength 14
         ];
-        let play = choose_follow(&legal, 0, &trick, &state, &bs, &sheepshead());
+        let play = choose_follow(&legal, 0, &trick, &state, &sheepshead());
         // Trick pts = 21 (≥10), play min winning trump = J♥ (strength 8)
         assert_eq!(play, Card::new(Suit::Hearts, Rank::Jack));
     }
@@ -521,7 +514,6 @@ mod tests {
         // Seat 2 (defender) is next — picker has played and is losing.
         // Seat 2 should dump highest-point card (A♣ fail = 11 pts), not waste trump.
         let state = state_with_picker(0);
-        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
         let trick = trick_with_plays(vec![
             (0, Suit::Diamonds, Rank::King),  // picker led K♦ (trump 4)
             (1, Suit::Clubs, Rank::Queen),    // defender trumped over with Q♣ (trump 14)
@@ -530,7 +522,7 @@ mod tests {
             Card::new(Suit::Diamonds, Rank::Jack), // J♦ is trump (strength 7)
             Card::new(Suit::Clubs, Rank::Ace),     // A♣ fail (11 pts)
         ];
-        let play = choose_follow(&legal, 2, &trick, &state, &bs, &sheepshead());
+        let play = choose_follow(&legal, 2, &trick, &state, &sheepshead());
         assert_eq!(play, Card::new(Suit::Clubs, Rank::Ace));
     }
 
@@ -539,7 +531,6 @@ mod tests {
         // Seat 1 led 7♣, picker(0) played Q♣ (trump 14, winning).
         // Seat 2 (defender) following. Trick is low value (3pts) — throw lowest, not trump.
         let state = state_with_picker(0);
-        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
         let trick = trick_with_plays(vec![
             (1, Suit::Clubs, Rank::Seven),
             (0, Suit::Clubs, Rank::Queen), // picker winning with Q♣ (trump 14)
@@ -548,7 +539,7 @@ mod tests {
             Card::new(Suit::Clubs, Rank::Eight),  // fail 0pts
             Card::new(Suit::Clubs, Rank::Nine),   // fail 0pts
         ];
-        let play = choose_follow(&legal, 2, &trick, &state, &bs, &sheepshead());
+        let play = choose_follow(&legal, 2, &trick, &state, &sheepshead());
         // Any low card is fine — just not trump
         assert!(sheepshead().trump_rank(play, &state).is_none());
     }
