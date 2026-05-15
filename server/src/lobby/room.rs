@@ -240,6 +240,9 @@ impl Room {
         let mut state = GameState::new(self.id, self.game_name.clone(), self.player_count, dealer);
         deal_game(self.game.as_ref(), &mut state, &mut rng);
 
+        // Populate seat names so clients can display "Bot 1" instead of "P0".
+        state.names = compute_names(self.player_count, &self.bot_seats.lock().unwrap());
+
         {
             let txs = self.player_txs.lock().unwrap();
             for (seat, tx_opt) in txs.iter().enumerate() {
@@ -273,4 +276,21 @@ impl Room {
         reached.sort_by(|&a, &b| session_scores[b].cmp(&session_scores[a]));
         Some(reached[0])
     }
+}
+
+/// Compute display names for all seats.
+/// Bot seats are named "Bot 1", "Bot 2", … in ascending seat-index order.
+/// Human seats are named "Player".
+fn compute_names(player_count: usize, bot_seats: &[bool]) -> Vec<String> {
+    let mut bot_counter = 0usize;
+    (0..player_count)
+        .map(|i| {
+            if bot_seats.get(i).copied().unwrap_or(false) {
+                bot_counter += 1;
+                format!("Bot {bot_counter}")
+            } else {
+                "Player".to_string()
+            }
+        })
+        .collect()
 }

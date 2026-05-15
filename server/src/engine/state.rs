@@ -32,6 +32,9 @@ pub struct GameState {
     /// Game-specific metadata (e.g. who picked the blind in Sheepshead, called trump in
     /// Euchre). Serialised as opaque JSON so the engine never needs to know the shape.
     pub meta: serde_json::Value,
+    /// Display name for each seat. Populated by the room before the first Snapshot.
+    #[serde(default)]
+    pub names: Vec<String>,
 }
 
 impl GameState {
@@ -60,6 +63,7 @@ impl GameState {
             completed_tricks: Vec::new(),
             scores: vec![0; player_count],
             meta: serde_json::Value::Null,
+            names: Vec::new(),
         }
     }
 }
@@ -84,6 +88,7 @@ pub enum ClientMessage {
 // Messages: server → client
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StateUpdate {
