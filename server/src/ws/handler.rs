@@ -42,9 +42,8 @@ async fn handle_socket(socket: WebSocket, lobby: Arc<Lobby>) {
                         match serde_json::from_str::<ClientMessage>(&text) {
                             Ok(client_msg) => {
                                 let reply = route(client_msg, &lobby, &player_tx, &mut ctx);
-                                if let Some(upd) = reply {
-                                    if send(&mut sink, &upd).await.is_err() { break; }
-                                }
+                                if let Some(upd) = reply
+                                    && send(&mut sink, &upd).await.is_err() { break; }
                             }
                             Err(e) => {
                                 let err = StateUpdate::Error { message: e.to_string() };
@@ -76,9 +75,8 @@ async fn handle_socket(socket: WebSocket, lobby: Arc<Lobby>) {
                     None => std::future::pending::<Option<StateUpdate>>().await,
                 }
             } => {
-                if let Some(u) = upd {
-                    if send(&mut sink, &u).await.is_err() { break; }
-                }
+                if let Some(u) = upd
+                    && send(&mut sink, &u).await.is_err() { break; }
             }
         }
     }
@@ -135,5 +133,5 @@ fn route(
 
 async fn send(sink: &mut Sink, update: &StateUpdate) -> Result<(), axum::Error> {
     let json = serde_json::to_string(update).expect("StateUpdate serialization failed");
-    sink.send(Message::Text(json.into())).await
+    sink.send(Message::Text(json)).await
 }

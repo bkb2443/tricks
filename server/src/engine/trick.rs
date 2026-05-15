@@ -21,6 +21,7 @@ impl Trick {
         self.plays.first().map(|(_, c)| *c)
     }
 
+    #[allow(dead_code)]
     pub fn is_complete(&self, player_count: usize) -> bool {
         self.plays.len() == player_count
     }

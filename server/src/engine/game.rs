@@ -48,6 +48,7 @@ pub enum PlayResult {
 
 /// Every trick-taking game implements this trait. The engine calls through it;
 /// no game-specific logic leaks into the engine layer.
+#[allow(dead_code)]
 pub trait Game: Send + Sync {
     fn name(&self) -> &'static str;
     fn valid_player_counts(&self) -> &'static [usize];

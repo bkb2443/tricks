@@ -1,5 +1,5 @@
 use crate::engine::{
-    BidResult, Card, DealResult, GamePhase, GameState, PlayResult, Rank, Suit, Trick,
+    BidResult, Card, DealResult, GamePhase, GameState, Rank, Suit, Trick,
     game::{EffectiveSuit, Game},
 };
 
@@ -385,6 +385,7 @@ impl Sheepshead {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::PlayResult;
     use uuid::Uuid;
 
     // ── helpers ──────────────────────────────────────────────────────────────

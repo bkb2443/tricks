@@ -35,6 +35,7 @@ impl Lobby {
         self.rooms.get(&id).map(|r| Arc::clone(&r))
     }
 
+    #[allow(dead_code)]
     pub fn remove_room(&self, id: Uuid) {
         self.rooms.remove(&id);
     }
