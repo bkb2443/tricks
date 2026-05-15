@@ -179,10 +179,45 @@ fn should_pick(hand: &[Card], state: &GameState, game: &dyn Game) -> bool {
             && game.trump_rank(*c, state).is_some()
     })
 }
-fn choose_bury(hand: &[Card], _state: &GameState, _game: &dyn Game) -> Vec<Card> {
-    let mut h = hand.to_vec();
-    h.sort_by_key(|c| point_value(*c));
-    h.into_iter().take(2).collect()
+fn choose_bury(hand: &[Card], state: &GameState, game: &dyn Game) -> Vec<Card> {
+    // Partition into fail (non-trump) and trump
+    let mut fail: Vec<Card> = hand.iter()
+        .filter(|c| game.trump_rank(**c, state).is_none())
+        .copied()
+        .collect();
+
+    if fail.len() >= 2 {
+        // Sort by point value descending
+        fail.sort_by(|a, b| point_value(*b).cmp(&point_value(*a)));
+        let first = fail[0];
+        // Prefer second card from same suit to create a void
+        let same_suit: Vec<Card> = fail[1..].iter()
+            .filter(|c| c.suit == first.suit)
+            .copied()
+            .collect();
+        let second = if !same_suit.is_empty() {
+            same_suit[0]
+        } else {
+            fail[1]
+        };
+        return vec![first, second];
+    }
+
+    if fail.len() == 1 {
+        // One fail card + lowest trump
+        let fail_card = fail[0];
+        let mut trump: Vec<Card> = hand.iter()
+            .filter(|c| game.trump_rank(**c, state).is_some())
+            .copied()
+            .collect();
+        trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
+        return vec![fail_card, trump[0]];
+    }
+
+    // All trump — bury the two weakest
+    let mut trump: Vec<Card> = hand.to_vec();
+    trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
+    trump.into_iter().take(2).collect()
 }
 fn choose_lead(hand: &[Card], _seat: usize, _state: &GameState, _bs: &BotState, _game: &dyn Game) -> Card {
     hand[0]
@@ -287,5 +322,57 @@ mod tests {
             (Suit::Clubs, Rank::King),
         ]);
         assert!(!should_pick(&hand, &base_state(), &sheepshead()));
+    }
+
+    #[test]
+    fn bury_prefers_fail_aces_and_tens() {
+        // Hand has fail ace, fail ten, and trump — should bury the ace and ten
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),   // trump — keep
+            (Suit::Spades, Rank::Jack),   // trump — keep
+            (Suit::Diamonds, Rank::Nine), // trump — keep
+            (Suit::Clubs, Rank::Ace),     // fail ace — bury first
+            (Suit::Clubs, Rank::Ten),     // fail ten — bury second
+            (Suit::Hearts, Rank::King),   // fail king
+        ]);
+        let buried = choose_bury(&hand, &base_state(), &sheepshead());
+        assert_eq!(buried.len(), 2);
+        assert!(buried.contains(&Card::new(Suit::Clubs, Rank::Ace)));
+        assert!(buried.contains(&Card::new(Suit::Clubs, Rank::Ten)));
+    }
+
+    #[test]
+    fn bury_avoids_trump_when_fail_available() {
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),
+            (Suit::Spades, Rank::Jack),
+            (Suit::Diamonds, Rank::Nine),
+            (Suit::Diamonds, Rank::Eight),
+            (Suit::Clubs, Rank::Ace),    // bury this
+            (Suit::Hearts, Rank::King),  // bury this
+        ]);
+        let buried = choose_bury(&hand, &base_state(), &sheepshead());
+        // Neither buried card should be trump
+        for c in &buried {
+            assert!(sheepshead().trump_rank(*c, &base_state()).is_none(),
+                "buried trump card {c}");
+        }
+    }
+
+    #[test]
+    fn bury_creates_void_when_possible() {
+        // Two clubs available — burying both creates a clubs void
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),
+            (Suit::Spades, Rank::Jack),
+            (Suit::Diamonds, Rank::Nine),
+            (Suit::Clubs, Rank::Ace),   // highest point fail
+            (Suit::Clubs, Rank::King),  // same suit — prefer over Hearts king (creates void)
+            (Suit::Hearts, Rank::King),
+        ]);
+        let buried = choose_bury(&hand, &base_state(), &sheepshead());
+        assert_eq!(buried.len(), 2);
+        // Both buried should be clubs (creating void)
+        assert!(buried.iter().all(|c| c.suit == Suit::Clubs));
     }
 }
