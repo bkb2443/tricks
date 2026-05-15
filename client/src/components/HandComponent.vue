@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Card } from '@/engine/types'
+import { sortHand } from '@/engine/sort'
 import CardComponent from './CardComponent.vue'
 
 const props = defineProps<{
@@ -9,6 +11,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ select: [card: Card] }>()
+
+const sortedCards = computed(() => sortHand(props.cards))
 
 function isSelected(card: Card): boolean {
   return (
@@ -22,7 +26,7 @@ function isSelected(card: Card): boolean {
 <template>
   <div class="hand">
     <card-component
-      v-for="(card, i) in cards"
+      v-for="(card, i) in sortedCards"
       :key="`${card.suit}-${card.rank}-${i}`"
       :card="card"
       :selectable="selectable"
