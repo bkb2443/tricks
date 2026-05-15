@@ -110,5 +110,7 @@ pub enum StateUpdate {
     HandUpdated { hand: Vec<Card> },
     /// Broadcast when the game transitions between phases (Bidding → Playing, etc.).
     PhaseChanged { phase: GamePhase },
+    /// Broadcast when a partner is revealed (e.g., Sheepshead partner mechanics).
+    PartnerRevealed { seat: usize },
     Error { message: String },
 }

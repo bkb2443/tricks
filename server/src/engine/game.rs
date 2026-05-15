@@ -26,6 +26,9 @@ pub struct BidResult {
     /// Seat whose hand was modified (e.g. picker took the blind, or buried cards).
     /// The room should send that player a private `HandUpdated`.
     pub hand_updated_seat: Option<usize>,
+    /// Optional override payload for the `BidPlaced` broadcast.
+    /// When set, the room uses this instead of the raw client bid value.
+    pub broadcast_payload: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
