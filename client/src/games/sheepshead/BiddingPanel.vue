@@ -8,7 +8,7 @@ import type { Card } from '@/engine/types'
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
-const { pick, pass, bury } = useGame()
+const { pick, pass, bury, callAce, goAlone } = useGame()
 
 // Two sub-phases: picking (anyone can pick/pass) and burying (picker discards 2)
 const isPickingPhase = computed(() => store.picker === null)
@@ -16,6 +16,15 @@ const isBuryPhase    = computed(() => store.picker !== null && store.phase === '
 
 const isMyPickTurn = computed(() => isPickingPhase.value && store.isMyTurn)
 const isMyBuryTurn = computed(() => isBuryPhase.value && store.isPicker)
+
+const isCallingPhase = computed(() => store.isCallingPhase)
+const isMyCallTurn   = computed(() => isCallingPhase.value && store.isPicker)
+
+const SUIT_LABELS: Record<string, string> = {
+  clubs:  '♣ Clubs',
+  spades: '♠ Spades',
+  hearts: '♥ Hearts',
+}
 
 // Bury selection — at most 2 cards
 const burySelection = ref<Card[]>([])
@@ -79,6 +88,27 @@ function submitBury() {
         Waiting for {{ playerName(store.picker ?? 0) }} to bury…
       </p>
     </template>
+
+    <!-- ── Calling sub-phase ───────────────────────────────────── -->
+    <template v-else-if="isCallingPhase">
+      <div v-if="isMyCallTurn" class="call-prompt">
+        <p>Choose your partner card or go alone</p>
+        <div class="call-suits">
+          <button
+            v-for="suit in store.callableSuits"
+            :key="suit"
+            class="btn-call"
+            @click="callAce(suit)"
+          >
+            {{ SUIT_LABELS[suit] ?? suit }} Ace
+          </button>
+        </div>
+        <button class="btn-alone" @click="goAlone">Go Alone (double stakes)</button>
+      </div>
+      <p v-else class="waiting-msg">
+        Waiting for {{ playerName(store.picker ?? 0) }} to call their partner…
+      </p>
+    </template>
   </div>
 </template>
 
@@ -90,7 +120,7 @@ function submitBury() {
   text-align: center;
 }
 
-.pick-prompt p, .bury-prompt p { margin-bottom: 0.75rem; font-size: 1rem; }
+.pick-prompt p, .bury-prompt p, .call-prompt p { margin-bottom: 0.75rem; font-size: 1rem; }
 .count { color: #9ca3af; font-size: 0.85rem; }
 .waiting-msg { color: #9ca3af; font-style: italic; margin: 0; }
 
@@ -104,6 +134,12 @@ function submitBury() {
 
 .btn-bury { margin-top: 0.75rem; background: #7c3aed; }
 .btn-bury:hover:not(:disabled) { background: #6d28d9; }
+
+.call-suits { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.btn-call { background: #0284c7; }
+.btn-call:hover { background: #0369a1; }
+.btn-alone { background: #9333ea; font-weight: 700; }
+.btn-alone:hover { background: #7e22ce; }
 
 @keyframes your-turn-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
