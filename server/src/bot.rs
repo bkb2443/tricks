@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::engine::{Card, GameState, Rank, Trick};
+use crate::engine::{Card, GameState, Rank, Suit, Trick};
 use crate::engine::game::{EffectiveSuit, Game};
 use crate::games::sheepshead::Sheepshead;
 
@@ -41,7 +41,9 @@ pub fn build_bot_state(state: &GameState, game: &dyn Game) -> BotState {
         }
     }
 
-    BotState { played_cards, known_voids, predicted_partner: None }
+    let predicted_partner = predict_partner(state, &known_voids);
+
+    BotState { played_cards, known_voids, predicted_partner }
 }
 
 // ---------------------------------------------------------------------------
@@ -123,18 +125,22 @@ fn min_winning_trump(candidates: &[Card], trick: &Trick, game: &dyn Game, state:
 /// Bid JSON the bot should submit.
 // FIXME: bid logic is hardcoded to Sheepshead; needs game: &dyn Game param when second game is added
 pub fn bid_action(state: &GameState, seat: usize) -> serde_json::Value {
-    if state.meta["picker"].is_null() {
-        // Pick/pass sub-phase
-        let hand = &state.hands[seat];
-        if should_pick(hand, state, &Sheepshead) {
-            serde_json::json!({ "action": "pick" })
-        } else {
-            serde_json::json!({ "action": "pass" })
+    let sub_phase = state.meta["sub_phase"].as_str().unwrap_or("picking");
+
+    match sub_phase {
+        "picking" => {
+            if should_pick(&state.hands[seat], state, &Sheepshead) {
+                serde_json::json!({ "action": "pick" })
+            } else {
+                serde_json::json!({ "action": "pass" })
+            }
         }
-    } else {
-        // Bury sub-phase
-        let bury = choose_bury(&state.hands[seat], state, &Sheepshead);
-        serde_json::json!({ "action": "bury", "cards": bury })
+        "burying" => {
+            let bury = choose_bury(&state.hands[seat], state, &Sheepshead);
+            serde_json::json!({ "action": "bury", "cards": bury })
+        }
+        "calling" => choose_call(state, seat),
+        _ => serde_json::json!({ "action": "pass" }),
     }
 }
 
@@ -154,7 +160,7 @@ pub fn play_card(state: &GameState, seat: usize, game: &dyn Game) -> Option<Card
         Some(trick) if trick.plays.is_empty() => Some(choose_lead(hand, seat, state, &bot_state, game)),
         Some(trick) => {
             let legal = game.legal_plays(hand, trick, state);
-            Some(choose_follow(&legal, seat, trick, state, game))
+            Some(choose_follow(&legal, seat, trick, state, &bot_state, game))
         }
     }
 }
@@ -219,6 +225,93 @@ fn choose_bury(hand: &[Card], state: &GameState, game: &dyn Game) -> Vec<Card> {
     trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
     trump.into_iter().take(2).collect()
 }
+fn choose_call(state: &GameState, seat: usize) -> serde_json::Value {
+    let hand = &state.hands[seat];
+
+    // Go alone if holding 5+ high trump (Jacks and Queens — trump rank ≥ 7)
+    let high_trump_count = hand
+        .iter()
+        .filter(|c| Sheepshead.trump_rank(**c, state).is_some_and(|r| r >= 7))
+        .count();
+
+    if high_trump_count >= 5 {
+        return serde_json::json!({ "action": "go_alone" });
+    }
+
+    // Call the suit where we hold the most non-trump cards (best chance to lead it)
+    let callable: Vec<String> = state.meta["callable_suits"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if callable.is_empty() {
+        return serde_json::json!({ "action": "go_alone" });
+    }
+
+    // Pick the suit with the most non-trump, non-ace cards in our hand
+    let best_suit = callable.iter().max_by_key(|suit_str| {
+        let suit: Option<Suit> =
+            serde_json::from_str(&format!("\"{}\"", suit_str)).ok();
+        suit.map_or(0, |s| {
+            hand.iter()
+                .filter(|c| {
+                    c.suit == s
+                        && c.rank != Rank::Ace
+                        && Sheepshead.trump_rank(**c, state).is_none()
+                })
+                .count()
+        })
+    });
+
+    match best_suit {
+        Some(suit) => serde_json::json!({ "action": "call", "suit": suit }),
+        None => serde_json::json!({ "action": "go_alone" }),
+    }
+}
+
+fn predict_partner(
+    state: &GameState,
+    known_voids: &HashMap<usize, HashSet<EffectiveSuit>>,
+) -> Option<usize> {
+    // Definitive: partner is revealed in meta
+    if let Some(p) = state.meta["partner"].as_u64() {
+        return Some(p as usize);
+    }
+
+    // Going alone or leaster — no partner
+    if state.meta["going_alone"].as_bool().unwrap_or(false)
+        || state.meta["leaster"].as_bool().unwrap_or(false)
+    {
+        return None;
+    }
+
+    // Pre-revelation inference: if called suit is known, players void in it can't be partner
+    let picker = state.meta["picker"].as_u64().map(|p| p as usize)?;
+    let called_suit_str = state.meta["called_suit"].as_str()?;
+    let called_suit: Suit =
+        serde_json::from_str(&format!("\"{}\"", called_suit_str)).ok()?;
+    let called_eff = EffectiveSuit::Plain(called_suit);
+
+    let candidates: Vec<usize> = (0..state.player_count)
+        .filter(|&s| {
+            s != picker
+                && !known_voids
+                    .get(&s)
+                    .is_some_and(|v| v.contains(&called_eff))
+        })
+        .collect();
+
+    if candidates.len() == 1 {
+        Some(candidates[0])
+    } else {
+        None
+    }
+}
+
 fn choose_lead(hand: &[Card], seat: usize, state: &GameState, bs: &BotState, game: &dyn Game) -> Card {
     let is_picker = picker_seat(state) == Some(seat);
 
@@ -280,46 +373,97 @@ fn lead_best_fail(hand: &[Card], state: &GameState, bs: &BotState, game: &dyn Ga
     trump.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
     trump.into_iter().next().unwrap_or(hand[0])
 }
-fn choose_follow(legal: &[Card], seat: usize, trick: &Trick, state: &GameState, game: &dyn Game) -> Card {
-    let is_picker = picker_seat(state) == Some(seat);
-    let trick_pts = trick_points(trick, game);
-    let winner_seat = current_winner(trick, game, state);
+fn choose_follow(
+    legal: &[Card],
+    seat: usize,
+    trick: &Trick,
+    state: &GameState,
+    bs: &BotState,
+    game: &dyn Game,
+) -> Card {
+    let picker = picker_seat(state);
+    let is_picker = picker == Some(seat);
+    let is_partner = bs.predicted_partner == Some(seat);
 
-    if is_picker {
-        follow_as_picker(legal, trick, trick_pts, winner_seat == seat, game, state)
+    if is_picker || is_partner {
+        // On the winning team
+        let teammate = if is_picker {
+            bs.predicted_partner
+        } else {
+            picker
+        };
+        let winner_seat = current_winner(trick, game, state);
+        let team_winning = winner_seat == seat
+            || (teammate == Some(winner_seat));
+        follow_as_team_member(legal, trick, team_winning, winner_seat == seat, game, state)
     } else {
-        let picker = picker_seat(state);
-        let picker_has_played = picker.is_none_or(|p| trick.plays.iter().any(|(s, _)| *s == p));
-        let picker_is_winning = picker.is_some_and(|p| winner_seat == p);
-        follow_as_defender(legal, trick, trick_pts, picker_has_played, picker_is_winning, game, state)
+        // Defender
+        let picker_has_played = picker
+            .is_none_or(|p| trick.plays.iter().any(|(s, _)| *s == p));
+        let partner_has_played = bs
+            .predicted_partner
+            .is_none_or(|p| trick.plays.iter().any(|(s, _)| *s == p));
+        let winner_seat = current_winner(trick, game, state);
+        let enemy_winning = picker
+            .into_iter()
+            .chain(bs.predicted_partner)
+            .any(|e| winner_seat == e);
+        follow_as_defender_ext(
+            legal,
+            trick,
+            picker_has_played,
+            partner_has_played,
+            enemy_winning,
+            game,
+            state,
+        )
     }
 }
 
-fn follow_as_picker(legal: &[Card], trick: &Trick, trick_pts: u8, i_am_winning: bool, game: &dyn Game, state: &GameState) -> Card {
+fn follow_as_team_member(
+    legal: &[Card],
+    trick: &Trick,
+    team_winning: bool,
+    i_am_winning: bool,
+    game: &dyn Game,
+    state: &GameState,
+) -> Card {
+    let trick_pts = trick_points(trick, game);
+
+    if team_winning && !i_am_winning {
+        // Teammate is winning — dump highest-point card
+        return highest_point_card(legal, game, state);
+    }
     if i_am_winning {
-        // Already winning — conserve resources, play lowest card
         return lowest_card(legal, game, state);
     }
-
-    // Currently losing
-    // High-value trick — play min trump to recapture
+    // Team is losing — try to recapture if worthwhile
     if trick_pts >= 10
         && let Some(t) = min_winning_trump(legal, trick, game, state) {
             return t;
         }
-
-    // Low value or can't beat — throw lowest
     lowest_card(legal, game, state)
 }
 
-fn follow_as_defender(legal: &[Card], trick: &Trick, trick_pts: u8, picker_has_played: bool, picker_is_winning: bool, game: &dyn Game, state: &GameState) -> Card {
-    if picker_has_played && !picker_is_winning {
-        // Picker is out and losing — a fellow defender is winning
-        // Dump highest-point card to load the trick
+fn follow_as_defender_ext(
+    legal: &[Card],
+    trick: &Trick,
+    picker_has_played: bool,
+    partner_has_played: bool,
+    enemy_winning: bool,
+    game: &dyn Game,
+    state: &GameState,
+) -> Card {
+    let trick_pts = trick_points(trick, game);
+    let all_enemies_played = picker_has_played && partner_has_played;
+
+    if all_enemies_played && !enemy_winning {
+        // All enemies out, defender is winning — dump points
         return highest_point_card(legal, game, state);
     }
 
-    if picker_has_played && picker_is_winning {
+    if all_enemies_played && enemy_winning {
+        // Enemy winning, all have played — beat if valuable
         if trick_pts >= 10
             && let Some(t) = min_winning_trump(legal, trick, game, state) {
                 return t;
@@ -327,15 +471,11 @@ fn follow_as_defender(legal: &[Card], trick: &Trick, trick_pts: u8, picker_has_p
         return lowest_card(legal, game, state);
     }
 
-    // Picker has not yet played — risk-weight
-    // Higher threshold (14 vs 10) because picker still has an unknown response;
-    // require at least an Ace + some card value before risking trump into the unknown
+    // Some enemies haven't played yet — be cautious
     if trick_pts >= 14
         && let Some(t) = min_winning_trump(legal, trick, game, state) {
             return t;
         }
-
-    // Low-value or can't win — throw lowest
     lowest_card(legal, game, state)
 }
 
@@ -503,7 +643,8 @@ mod tests {
             Card::new(Suit::Hearts, Rank::Jack), // J♥ trump strength 8
             Card::new(Suit::Clubs, Rank::Queen),  // Q♣ trump strength 14
         ];
-        let play = choose_follow(&legal, 0, &trick, &state, &sheepshead());
+        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
+        let play = choose_follow(&legal, 0, &trick, &state, &bs, &sheepshead());
         // Trick pts = 21 (≥10), play min winning trump = J♥ (strength 8)
         assert_eq!(play, Card::new(Suit::Hearts, Rank::Jack));
     }
@@ -522,7 +663,8 @@ mod tests {
             Card::new(Suit::Diamonds, Rank::Jack), // J♦ is trump (strength 7)
             Card::new(Suit::Clubs, Rank::Ace),     // A♣ fail (11 pts)
         ];
-        let play = choose_follow(&legal, 2, &trick, &state, &sheepshead());
+        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
+        let play = choose_follow(&legal, 2, &trick, &state, &bs, &sheepshead());
         assert_eq!(play, Card::new(Suit::Clubs, Rank::Ace));
     }
 
@@ -539,7 +681,8 @@ mod tests {
             Card::new(Suit::Clubs, Rank::Eight),  // fail 0pts
             Card::new(Suit::Clubs, Rank::Nine),   // fail 0pts
         ];
-        let play = choose_follow(&legal, 2, &trick, &state, &sheepshead());
+        let bs = BotState { played_cards: HashSet::new(), known_voids: HashMap::new(), predicted_partner: None };
+        let play = choose_follow(&legal, 2, &trick, &state, &bs, &sheepshead());
         // Any low card is fine — just not trump
         assert!(sheepshead().trump_rank(play, &state).is_none());
     }
