@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
@@ -20,6 +21,7 @@ pub struct Room {
     session_scores: Mutex<Vec<i32>>,
     /// Which seats are driven by the server-side bot (true = bot seat).
     bot_seats: Mutex<Vec<bool>>,
+    bots_running: AtomicBool,
 }
 
 impl Room {
@@ -45,6 +47,7 @@ impl Room {
             state: Mutex::new(None),
             session_scores,
             bot_seats,
+            bots_running: AtomicBool::new(false),
         }
     }
 
@@ -185,6 +188,17 @@ impl Room {
     /// Apply consecutive bot actions until it's a human player's turn or the session ends.
     /// Sleeps `BOT_ACTION_DELAY_MS` before each action so bots feel like real players.
     pub async fn drive_bots(&self) {
+        // Only one drive_bots task per room at a time. If another is running, return immediately.
+        if self.bots_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        // Reset the flag when this task exits (for any reason).
+        struct Guard<'a>(&'a AtomicBool);
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); }
+        }
+        let _guard = Guard(&self.bots_running);
+
         loop {
             let (seat, phase) = {
                 let guard = self.state.lock().unwrap();
