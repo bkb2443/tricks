@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, ref } from 'vue'
+import { computed, watch, ref, onUnmounted } from 'vue'
 import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
@@ -56,7 +56,7 @@ watch(
   (newPhase, oldPhase) => {
     if (newPhase && oldPhase && newPhase !== oldPhase) {
       if (toastTimer !== null) clearTimeout(toastTimer)
-      phaseToast.value = phaseLabel(state.value.game_name, newPhase)
+      phaseToast.value = phaseLabel(state.value?.game_name ?? '', newPhase)
       toastTimer = setTimeout(() => {
         phaseToast.value = null
         toastTimer = null
@@ -64,6 +64,10 @@ watch(
     }
   },
 )
+
+onUnmounted(() => {
+  if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null }
+})
 </script>
 
 <template>
