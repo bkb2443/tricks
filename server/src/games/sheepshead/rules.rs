@@ -102,10 +102,15 @@ impl Game for Sheepshead {
             // `buried`       → two cards the picker chose to set aside
             // `leaster`      → true when all five players pass
             initial_meta: serde_json::json!({
-                "picker":  null,
-                "passed":  0,
-                "buried":  [],
-                "leaster": false
+                "picker":         null,
+                "sub_phase":      "picking",
+                "passed":         0,
+                "buried":         [],
+                "leaster":        false,
+                "callable_suits": [],
+                "called_suit":    null,
+                "going_alone":    false,
+                "partner":        null
             }),
         }
     }
@@ -138,11 +143,13 @@ impl Game for Sheepshead {
         }
 
         let action = value["action"].as_str().ok_or("missing 'action' field")?;
+        let sub_phase = state.meta["sub_phase"].as_str().unwrap_or("picking");
 
-        if state.meta["picker"].is_null() {
-            self.handle_pick_or_pass(state, seat, action)
-        } else {
-            self.handle_bury(state, seat, action, value)
+        match sub_phase {
+            "picking" => self.handle_pick_or_pass(state, seat, action),
+            "burying" => self.handle_bury(state, seat, action, value),
+            "calling" => self.handle_call(state, seat, action, value),
+            _ => Err(format!("unknown sub_phase '{sub_phase}'")),
         }
     }
 
@@ -277,6 +284,23 @@ impl Game for Sheepshead {
 // Private helpers
 // ---------------------------------------------------------------------------
 
+/// Returns the fail suits whose ace the picker can legally call.
+/// Callable if: picker doesn't hold the ace AND picker holds at least one
+/// other non-trump card of that suit.
+fn callable_suits(hand: &[Card]) -> Vec<Suit> {
+    [Suit::Clubs, Suit::Spades, Suit::Hearts]
+        .iter()
+        .copied()
+        .filter(|&suit| {
+            let has_ace = hand.contains(&Card::new(suit, Rank::Ace));
+            let has_other = hand.iter().any(|c| {
+                c.suit == suit && c.rank != Rank::Ace && trump_strength(*c).is_none()
+            });
+            !has_ace && has_other
+        })
+        .collect()
+}
+
 impl Sheepshead {
     fn handle_pick_or_pass(
         &self,
@@ -303,9 +327,10 @@ impl Sheepshead {
                 state.hands[seat].extend(blind);
 
                 state.meta["picker"] = serde_json::json!(seat);
+                state.meta["sub_phase"] = serde_json::json!("burying");
                 // current_player stays as `seat` — they must now bury 2 cards
 
-                Ok(BidResult { phase_complete: false, hand_updated_seat: Some(seat) })
+                Ok(BidResult { phase_complete: false, hand_updated_seat: Some(seat), broadcast_payload: None })
             }
 
             "pass" => {
@@ -317,10 +342,10 @@ impl Sheepshead {
                     state.meta["leaster"] = serde_json::json!(true);
                     state.phase = GamePhase::Playing;
                     state.current_player = (state.dealer + 1) % state.player_count;
-                    Ok(BidResult { phase_complete: true, hand_updated_seat: None })
+                    Ok(BidResult { phase_complete: true, hand_updated_seat: None, broadcast_payload: None })
                 } else {
                     state.current_player = (state.dealer + 1 + passed) % state.player_count;
-                    Ok(BidResult { phase_complete: false, hand_updated_seat: None })
+                    Ok(BidResult { phase_complete: false, hand_updated_seat: None, broadcast_payload: None })
                 }
             }
 
@@ -335,7 +360,10 @@ impl Sheepshead {
         action: &str,
         value: &serde_json::Value,
     ) -> Result<BidResult, String> {
-        let picker = state.meta["picker"].as_u64().unwrap() as usize;
+        let picker = state.meta["picker"]
+            .as_u64()
+            .ok_or_else(|| "picker not set".to_string())?
+            as usize;
 
         if seat != picker {
             return Err(format!("only the picker (player {picker}) can bury cards"));
@@ -366,15 +394,81 @@ impl Sheepshead {
 
         // Remove buried cards from picker's hand (back to 6 cards)
         for card in &bury {
-            let pos = state.hands[seat].iter().position(|c| c == card).unwrap();
+            let pos = state.hands[seat]
+                .iter()
+                .position(|c| c == card)
+                .ok_or_else(|| format!("card {card} disappeared from hand during removal"))?;
             state.hands[seat].remove(pos);
         }
 
         state.meta["buried"] = serde_json::to_value(&bury).unwrap();
+
+        // Compute which fail aces the picker can legally call
+        let suits = callable_suits(&state.hands[seat]);
+        let suits_json: Vec<&str> = suits.iter().map(|s| match s {
+            Suit::Clubs    => "clubs",
+            Suit::Spades   => "spades",
+            Suit::Hearts   => "hearts",
+            Suit::Diamonds => "diamonds",
+        }).collect();
+        state.meta["callable_suits"] = serde_json::json!(suits_json);
+        state.meta["sub_phase"]      = serde_json::json!("calling");
+
+        let payload = serde_json::json!({
+            "sub_phase":      "calling",
+            "callable_suits": suits_json
+        });
+
+        Ok(BidResult {
+            phase_complete:    false,
+            hand_updated_seat: Some(seat),
+            broadcast_payload: Some(payload),
+        })
+    }
+
+    fn handle_call(
+        &self,
+        state: &mut GameState,
+        seat: usize,
+        action: &str,
+        value: &serde_json::Value,
+    ) -> Result<BidResult, String> {
+        let picker = state.meta["picker"]
+            .as_u64()
+            .ok_or_else(|| "picker not set".to_string())?
+            as usize;
+        if seat != picker {
+            return Err(format!("only the picker (player {picker}) can call a partner"));
+        }
+
+        match action {
+            "go_alone" => {
+                state.meta["going_alone"] = serde_json::json!(true);
+                state.meta["called_suit"] = serde_json::Value::Null;
+            }
+            "call" => {
+                let suit_str = value["suit"].as_str().ok_or("missing 'suit' field")?;
+                let callable = state.meta["callable_suits"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                if !callable.contains(&suit_str) {
+                    return Err(format!(
+                        "suit '{suit_str}' is not callable; callable: {}",
+                        callable.join(", ")
+                    ));
+                }
+                state.meta["called_suit"] = serde_json::json!(suit_str);
+                state.meta["going_alone"] = serde_json::json!(false);
+            }
+            _ => return Err(format!("unknown calling action '{action}'; expected 'call' or 'go_alone'")),
+        }
+
+        state.meta["sub_phase"] = serde_json::json!("done");
         state.phase = GamePhase::Playing;
         state.current_player = (state.dealer + 1) % state.player_count;
 
-        Ok(BidResult { phase_complete: true, hand_updated_seat: Some(seat) })
+        Ok(BidResult { phase_complete: true, hand_updated_seat: None, broadcast_payload: None })
     }
 }
 
@@ -501,7 +595,7 @@ mod tests {
     // ── burying sub-phase ────────────────────────────────────────────────────
 
     #[test]
-    fn bury_removes_cards_and_transitions_to_playing() {
+    fn bury_removes_cards_and_transitions_to_calling() {
         let mut state = dealt_state();
         Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
 
@@ -513,12 +607,12 @@ mod tests {
         });
         let r = Sheepshead.apply_bid(&mut state, 1, &bury_msg).unwrap();
 
-        assert!(r.phase_complete);
+        assert!(!r.phase_complete); // stays in Bidding until call/go_alone
         assert_eq!(r.hand_updated_seat, Some(1));
         assert_eq!(state.hands[1].len(), 6); // back to 6 after bury
-        assert_eq!(state.phase, GamePhase::Playing);
+        assert_eq!(state.phase, GamePhase::Bidding);
+        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
         assert_eq!(state.meta["buried"].as_array().unwrap().len(), 2);
-        assert_eq!(state.current_player, 1); // (dealer+1)%5 = 1
     }
 
     #[test]
@@ -574,6 +668,10 @@ mod tests {
         let c2 = state.hands[1][1];
         Sheepshead
             .apply_bid(&mut state, 1, &serde_json::json!({"action":"bury","cards":[c1,c2]}))
+            .unwrap();
+        // Must now call or go_alone before reaching Playing phase
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"go_alone"}))
             .unwrap();
         // phase == Playing, current_player == 1 (dealer=0, left of dealer leads)
         state
@@ -746,5 +844,77 @@ mod tests {
         trick.plays.push((1, Card::new(Suit::Clubs, Rank::Seven)));    // ♣7
         trick.plays.push((2, Card::new(Suit::Diamonds, Rank::Seven))); // 7♦ = lowest trump
         assert_eq!(Sheepshead.trick_winner(&trick, &state), 2);
+    }
+
+    // ── calling sub-phase ────────────────────────────────────────────────────
+
+    /// Advance to the calling sub-phase (pick → bury → ready for call).
+    fn calling_state() -> (GameState, usize) {
+        let mut state = dealt_state();
+        // player 1 picks (dealer=0, first player=1)
+        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        let c1 = state.hands[1][0];
+        let c2 = state.hands[1][1];
+        let r = Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"bury","cards":[c1,c2]}))
+            .unwrap();
+        // After burying, should be in calling sub-phase (NOT playing yet)
+        assert!(!r.phase_complete, "bury should NOT transition to Playing directly");
+        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
+        (state, 1) // (state, picker_seat)
+    }
+
+    #[test]
+    fn bury_transitions_to_calling_not_playing() {
+        let (state, _) = calling_state();
+        assert_eq!(state.phase, GamePhase::Bidding);
+        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
+        assert!(state.meta["callable_suits"].is_array());
+    }
+
+    #[test]
+    fn go_alone_transitions_to_playing() {
+        let (mut state, picker) = calling_state();
+        let r = Sheepshead
+            .apply_bid(&mut state, picker, &serde_json::json!({"action":"go_alone"}))
+            .unwrap();
+        assert!(r.phase_complete);
+        assert_eq!(state.phase, GamePhase::Playing);
+        assert_eq!(state.meta["going_alone"].as_bool(), Some(true));
+        assert!(state.meta["called_suit"].is_null());
+    }
+
+    #[test]
+    fn call_valid_suit_transitions_to_playing() {
+        let (mut state, picker) = calling_state();
+        // Find a callable suit from meta
+        let suits = state.meta["callable_suits"].as_array().unwrap().clone();
+        if suits.is_empty() {
+            // No callable suit means forced go_alone — skip this test
+            return;
+        }
+        let suit_str = suits[0].as_str().unwrap().to_string();
+        let r = Sheepshead
+            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}))
+            .unwrap();
+        assert!(r.phase_complete);
+        assert_eq!(state.phase, GamePhase::Playing);
+        assert_eq!(state.meta["called_suit"].as_str(), Some(suit_str.as_str()));
+        assert_eq!(state.meta["going_alone"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn call_ace_picker_holds_is_rejected() {
+        let (mut state, picker) = calling_state();
+        // Find a suit whose ace the picker holds — should be invalid
+        let ace_in_hand = state.hands[picker].iter()
+            .find(|c| c.rank == Rank::Ace && c.suit != Suit::Diamonds
+                    && trump_strength(**c).is_none())
+            .copied();
+        let Some(ace) = ace_in_hand else { return }; // skip if no fail aces in hand
+        let suit_str = format!("{:?}", ace.suit).to_lowercase();
+        let err = Sheepshead
+            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}));
+        assert!(err.is_err(), "should reject calling an ace the picker holds");
     }
 }
