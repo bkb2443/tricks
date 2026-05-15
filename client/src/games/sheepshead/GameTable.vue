@@ -68,6 +68,14 @@ watch(
 onUnmounted(() => {
   if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null }
 })
+
+const partnerToast = computed(() => {
+  const s = store.partnerRevealedSeat
+  if (s === null) return null
+  return `${playerName(s)} is the partner!`
+})
+
+const calledSuit = computed(() => store.calledSuit)
 </script>
 
 <template>
@@ -75,6 +83,11 @@ onUnmounted(() => {
     <!-- ── Phase change toast ──────────────────────────────────── -->
     <Transition name="toast">
       <div v-if="phaseToast" class="phase-toast">{{ phaseToast }}</div>
+    </Transition>
+
+    <!-- ── Partner reveal toast ─────────────────────────────────── -->
+    <Transition name="toast">
+      <div v-if="partnerToast" class="phase-toast partner-toast">{{ partnerToast }}</div>
     </Transition>
 
     <!-- ── Header: phase indicator + dealer badge ──────────────── -->
@@ -121,6 +134,9 @@ onUnmounted(() => {
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
         <span v-if="store.isPicker" class="badge picker">Picker</span>
+        <span v-if="store.isPicker && calledSuit" class="badge called-suit">
+          Called: A{{ calledSuit === 'clubs' ? '♣' : calledSuit === 'spades' ? '♠' : '♥' }}
+        </span>
         <span v-if="seat === state.dealer" class="badge">Dealer</span>
         <span v-if="canPlay" class="your-turn">↑ Your turn</span>
       </div>
@@ -370,4 +386,6 @@ onUnmounted(() => {
   z-index: 100;
   letter-spacing: 0.04em;
 }
+.partner-toast { background: rgba(13, 148, 136, 0.9); }
+.called-suit { background: #0284c7; color: #fff; font-size: 0.65rem; padding: 0 5px; border-radius: 3px; margin-left: 0.25rem; }
 </style>
