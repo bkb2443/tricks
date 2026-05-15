@@ -37,7 +37,10 @@ function scoreClass(s: number) {
   return s > 0 ? 'win' : s < 0 ? 'loss' : ''
 }
 
-const partnerSeat = computed<number | null>(() => null)
+const partnerSeat = computed<number | null>(() => {
+  const p = state.value.meta?.partner
+  return typeof p === 'number' ? p : null
+})
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th']
 function trickOrdinal(n: number) {

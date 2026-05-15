@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Card, GamePhase, GameState, StateUpdate } from '@/engine/types'
+import { trickWinnerIndex } from '@/engine/sort'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -32,6 +33,13 @@ export const useGameStore = defineStore('game', () => {
 
   /** True once all seats are filled and the server has sent the first Snapshot. */
   const gameStarted = computed(() => gameState.value !== null)
+
+  /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress. */
+  const currentTrickWinner = computed<number>(() => {
+    const trick = gameState.value?.current_trick
+    if (!trick || trick.plays.length === 0) return -1
+    return trickWinnerIndex(trick)
+  })
 
   /** Returns "You" for the local player's seat, the server-assigned name otherwise,
    *  falling back to "P{seat}" if names haven't loaded yet. */
@@ -135,7 +143,7 @@ export const useGameStore = defineStore('game', () => {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner,
     // derived
-    phase, isMyTurn, picker, isPicker, gameStarted, playerName,
+    phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
     // actions
     handleUpdate, reset,
   }
