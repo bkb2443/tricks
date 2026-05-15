@@ -100,7 +100,8 @@ fn route(
                     let reply = StateUpdate::JoinedRoom { room_id: room.id, seat };
                     if fill_bots {
                         room.fill_bots();
-                        room.drive_bots();
+                        let room_arc = Arc::clone(&room);
+                        tokio::spawn(async move { room_arc.drive_bots().await });
                     }
                     *ctx = Some(PlayerCtx { seat, room, broadcast_rx });
                     Some(reply)
@@ -114,7 +115,11 @@ fn route(
                 return Some(StateUpdate::Error { message: "not in a room".into() });
             };
             match c.room.apply_bid(c.seat, value) {
-                Ok(()) => { c.room.drive_bots(); None }
+                Ok(()) => {
+                    let room_arc = Arc::clone(&c.room);
+                    tokio::spawn(async move { room_arc.drive_bots().await });
+                    None
+                }
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
         }
@@ -124,7 +129,11 @@ fn route(
                 return Some(StateUpdate::Error { message: "not in a room".into() });
             };
             match c.room.play_card(c.seat, card) {
-                Ok(()) => { c.room.drive_bots(); None }
+                Ok(()) => {
+                    let room_arc = Arc::clone(&c.room);
+                    tokio::spawn(async move { room_arc.drive_bots().await });
+                    None
+                }
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
         }

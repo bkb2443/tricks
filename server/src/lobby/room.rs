@@ -180,8 +180,11 @@ impl Room {
         }
     }
 
+    const BOT_ACTION_DELAY_MS: u64 = 1200;
+
     /// Apply consecutive bot actions until it's a human player's turn or the session ends.
-    pub fn drive_bots(&self) {
+    /// Sleeps `BOT_ACTION_DELAY_MS` before each action so bots feel like real players.
+    pub async fn drive_bots(&self) {
         loop {
             let (seat, phase) = {
                 let guard = self.state.lock().unwrap();
@@ -194,7 +197,8 @@ impl Room {
                 if self.session_winner(&session_scores).is_some() {
                     break; // Session is over; stop driving.
                 }
-                // Hand over but session continues — deal the next hand.
+                // Pause before starting the next hand.
+                tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
                 let next_dealer = {
                     let guard = self.state.lock().unwrap();
                     guard.as_ref().map(|s| (s.dealer + 1) % self.player_count).unwrap_or(0)
@@ -203,9 +207,13 @@ impl Room {
                 continue;
             }
 
+            // Human player's turn — stop driving immediately (no delay).
             if !self.bot_seats.lock().unwrap().get(seat).copied().unwrap_or(false) {
                 break;
             }
+
+            // Pause before the bot acts.
+            tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
 
             if phase == GamePhase::Bidding {
                 let value = {
