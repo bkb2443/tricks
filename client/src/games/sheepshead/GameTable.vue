@@ -8,6 +8,7 @@ import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 
 const store = useGameStore()
+const { playerName } = store
 const { playCard } = useGame()
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -35,6 +36,8 @@ function scoreClass(s: number) {
   return s > 0 ? 'win' : s < 0 ? 'loss' : ''
 }
 
+const partnerSeat = computed<number | null>(() => null)
+
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th']
 function trickOrdinal(n: number) {
   return ORDINALS[n] ?? `${n + 1}th`
@@ -46,7 +49,7 @@ function trickOrdinal(n: number) {
     <!-- ── Header: phase indicator + dealer badge ──────────────── -->
     <header class="table-header">
       <span class="phase-badge" :class="state.phase">{{ state.phase }}</span>
-      <span class="dealer-badge">Dealer: P{{ state.dealer }}</span>
+      <span class="dealer-badge">Dealer: {{ playerName(state.dealer) }}</span>
       <span class="trick-counter">
         Trick {{ state.completed_tricks.length + (state.current_trick ? 1 : 0) }} / 6
       </span>
@@ -61,9 +64,9 @@ function trickOrdinal(n: number) {
         :class="{ active: state.current_player === p }"
       >
         <span class="seat-label">
-          P{{ p }}
+          {{ playerName(p) }}
           <span v-if="p === state.dealer" class="badge">D</span>
-          <span v-if="p === store.picker" class="badge picker">P</span>
+          <span v-if="p === store.picker" class="role-badge picker">Picker</span>
         </span>
         <span class="card-count">{{ state.hands[p].length }} cards</span>
       </div>
@@ -73,7 +76,9 @@ function trickOrdinal(n: number) {
     <trick-display
       :trick="state.current_trick"
       :my-seat="seat"
-      :player-count="state.player_count"
+      :names="state.names ?? []"
+      :picker-seat="store.picker"
+      :partner-seat="partnerSeat"
     />
 
     <!-- ── Bidding panel (only during Bidding phase) ──────────── -->
@@ -219,7 +224,14 @@ function trickOrdinal(n: number) {
   padding: 0 4px;
   border-radius: 3px;
 }
-.badge.picker { background: #7c3aed; }
+.role-badge {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.role-badge.picker { background: #7c3aed; color: #fff; }
 
 /* My hand */
 .my-hand {
