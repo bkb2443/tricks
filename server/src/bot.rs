@@ -14,7 +14,7 @@ pub struct BotState {
     pub played_cards: HashSet<Card>,
     /// Suits a player has shown they cannot follow (inferred from trick history).
     pub known_voids: HashMap<usize, HashSet<EffectiveSuit>>,
-    /// Reserved for future partner-calling mechanic; always None for now.
+    /// Predicted partner seat, inferred from void tracking or meta revelation.
     pub predicted_partner: Option<usize>,
 }
 

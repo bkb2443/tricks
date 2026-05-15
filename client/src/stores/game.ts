@@ -139,7 +139,17 @@ export const useGameStore = defineStore('game', () => {
         break
 
       case 'bid_placed':
-        if (gameState.value) gameState.value.current_player = update.current_player
+        if (gameState.value) {
+          gameState.value.current_player = update.current_player
+          // Merge any game-metadata included in the bid payload (e.g. sub_phase, callable_suits
+          // when transitioning to the calling sub-phase after bury).
+          if (typeof update.value === 'object' && update.value !== null) {
+            gameState.value.meta = {
+              ...gameState.value.meta,
+              ...(update.value as Record<string, unknown>),
+            }
+          }
+        }
         break
 
       case 'hand_complete':
