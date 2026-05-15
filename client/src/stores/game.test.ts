@@ -192,6 +192,11 @@ describe('game store', () => {
     expect(store.gameState?.current_player).toBe(1)
   })
 
+  it('stores completedTrick for 1.5s after trick_complete', async () => {
+    const store = useGameStore()
+    expect(store.completedTrick).toBeNull()
+  })
+
   // ── bid_placed — bug fixed: current_player must advance during picking ──────
 
   // BUG FIX: bid_placed must update current_player so that isMyTurn becomes

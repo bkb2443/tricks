@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, GamePhase, GameState, StateUpdate } from '@/engine/types'
+import type { Card, GamePhase, GameState, StateUpdate, Trick } from '@/engine/types'
 import { trickWinnerIndex } from '@/engine/sort'
 
 export const useGameStore = defineStore('game', () => {
@@ -13,6 +13,8 @@ export const useGameStore = defineStore('game', () => {
   const isSolo        = ref<boolean>(false)
   const sessionScores = ref<number[]>([])
   const sessionWinner = ref<number | null>(null)
+  const completedTrick = ref<Trick | null>(null)
+  let pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const phase = computed<GamePhase | null>(() => gameState.value?.phase ?? null)
@@ -76,6 +78,12 @@ export const useGameStore = defineStore('game', () => {
         if (s.current_trick) {
           s.current_trick.plays.push([update.player, update.card])
         } else {
+          // New trick starting — cancel any pending completion display
+          if (pauseTimer !== null) {
+            clearTimeout(pauseTimer)
+            pauseTimer = null
+          }
+          completedTrick.value = null
           s.current_trick = { led_by: update.player, plays: [[update.player, update.card]], winner: null }
         }
         // Advance current_player to the next in trick order. The server does this
@@ -101,6 +109,13 @@ export const useGameStore = defineStore('game', () => {
         gameState.value.completed_tricks.push(t)
         gameState.value.current_trick  = null
         gameState.value.current_player = update.winner
+        // Hold the completed trick visible for 1.5s
+        completedTrick.value = { ...t }
+        if (pauseTimer !== null) clearTimeout(pauseTimer)
+        pauseTimer = setTimeout(() => {
+          completedTrick.value = null
+          pauseTimer = null
+        }, 1500)
         break
       }
 
@@ -137,11 +152,13 @@ export const useGameStore = defineStore('game', () => {
     isSolo.value        = false
     sessionScores.value = []
     sessionWinner.value = null
+    completedTrick.value = null
+    if (pauseTimer !== null) { clearTimeout(pauseTimer); pauseTimer = null }
   }
 
   return {
     // state
-    roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner,
+    roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
     // actions
