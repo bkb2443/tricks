@@ -183,7 +183,7 @@ pub trait Game: Send + Sync {
 }
 
 /// The logical suit category of a card (distinguishes trump from plain suits).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectiveSuit {
     Trump,
     Plain(crate::engine::Suit),
