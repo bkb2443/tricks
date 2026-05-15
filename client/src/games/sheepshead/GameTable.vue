@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
 import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
+import { phaseLabel } from '@/engine/phases'
 
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
@@ -46,13 +47,35 @@ const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th']
 function trickOrdinal(n: number) {
   return ORDINALS[n] ?? `${n + 1}th`
 }
+
+const phaseToast = ref<string | null>(null)
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+watch(
+  () => state.value?.phase,
+  (newPhase, oldPhase) => {
+    if (newPhase && oldPhase && newPhase !== oldPhase) {
+      if (toastTimer !== null) clearTimeout(toastTimer)
+      phaseToast.value = phaseLabel(state.value.game_name, newPhase)
+      toastTimer = setTimeout(() => {
+        phaseToast.value = null
+        toastTimer = null
+      }, 1500)
+    }
+  },
+)
 </script>
 
 <template>
   <div class="sheepshead-table">
+    <!-- ── Phase change toast ──────────────────────────────────── -->
+    <Transition name="toast">
+      <div v-if="phaseToast" class="phase-toast">{{ phaseToast }}</div>
+    </Transition>
+
     <!-- ── Header: phase indicator + dealer badge ──────────────── -->
     <header class="table-header">
-      <span class="phase-badge" :class="state.phase">{{ state.phase }}</span>
+      <span class="phase-badge" :class="state.phase">{{ phaseLabel(state.game_name, state.phase) }}</span>
       <span class="dealer-badge">Dealer: {{ playerName(state.dealer) }}</span>
       <span class="trick-counter">
         Trick {{ state.completed_tricks.length + (state.current_trick ? 1 : 0) }} / 6
@@ -323,5 +346,24 @@ function trickOrdinal(n: number) {
   outline: 2px solid rgba(34, 197, 94, 0.7);
   outline-offset: 2px;
   animation: your-turn-pulse 1.2s ease-in-out infinite;
+}
+
+/* Phase change toast */
+.toast-enter-active, .toast-leave-active { transition: opacity 0.2s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; }
+.phase-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 700;
+  padding: 1rem 2.5rem;
+  border-radius: 12px;
+  pointer-events: none;
+  z-index: 100;
+  letter-spacing: 0.04em;
 }
 </style>
