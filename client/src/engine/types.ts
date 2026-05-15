@@ -37,6 +37,8 @@ export interface GameState {
   scores: number[]
   /** Game-specific metadata (opaque; typed per-game where needed). */
   meta: Record<string, unknown>
+  /** Display name for each seat index. May be empty array on old server versions. */
+  names: string[]
 }
 
 // ---------------------------------------------------------------------------

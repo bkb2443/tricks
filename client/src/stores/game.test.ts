@@ -17,6 +17,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     completed_tricks: [],
     scores: [0, 0, 0, 0, 0],
     meta: { picker: null, passed: 0, buried: [], leaster: false },
+    names: [],
     ...overrides,
   }
 }

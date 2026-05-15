@@ -33,6 +33,13 @@ export const useGameStore = defineStore('game', () => {
   /** True once all seats are filled and the server has sent the first Snapshot. */
   const gameStarted = computed(() => gameState.value !== null)
 
+  /** Returns "You" for the local player's seat, the server-assigned name otherwise,
+   *  falling back to "P{seat}" if names haven't loaded yet. */
+  function playerName(s: number): string {
+    if (s === seat.value) return 'You'
+    return gameState.value?.names?.[s] || `P${s}`
+  }
+
   // ── Update handler ────────────────────────────────────────────────────────
 
   function handleUpdate(update: StateUpdate): void {
@@ -128,7 +135,7 @@ export const useGameStore = defineStore('game', () => {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner,
     // derived
-    phase, isMyTurn, picker, isPicker, gameStarted,
+    phase, isMyTurn, picker, isPicker, gameStarted, playerName,
     // actions
     handleUpdate, reset,
   }
