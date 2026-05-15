@@ -31,7 +31,7 @@ const winnerIdx = computed(() =>
       <div v-for="([player, card], i) in trick.plays" :key="i" class="play">
         <!-- Play-order badge and player name row -->
         <div class="play-header">
-          <span class="order-badge">{{ ORDER_BADGES[i] ?? i + 1 }}</span>
+          <span class="order-badge">{{ ORDER_BADGES[i] ?? String(i + 1) }}</span>
           <span class="player-label">
             {{ playerLabel(player) }}
           </span>

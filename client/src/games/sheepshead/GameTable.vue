@@ -8,6 +8,7 @@ import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 
 const store = useGameStore()
+// Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
 const { playCard } = useGame()
 
@@ -109,7 +110,7 @@ function trickOrdinal(n: number) {
           class="score-row"
           :class="scoreClass(score)"
         >
-          <span>{{ i === seat ? 'You (P' + i + ')' : 'P' + i }}</span>
+          <span>{{ i === seat ? 'You (' + playerName(i) + ')' : playerName(i) }}</span>
           <span class="score-value">{{ score > 0 ? '+' : '' }}{{ score }}</span>
           <span class="progress-bar-wrap">
             <span
@@ -131,7 +132,7 @@ function trickOrdinal(n: number) {
           class="score-row"
           :class="scoreClass(score)"
         >
-          <span>{{ i === seat ? 'You (P' + i + ')' : 'P' + i }}</span>
+          <span>{{ i === seat ? 'You (' + playerName(i) + ')' : playerName(i) }}</span>
           <span class="score-value">{{ score > 0 ? '+' : '' }}{{ score }}</span>
         </li>
       </ul>
@@ -140,14 +141,14 @@ function trickOrdinal(n: number) {
 
     <!-- ── Session over ──────────────────────────────────────── -->
     <section v-if="store.sessionWinner !== null" class="game-over session-over">
-      <h2>{{ store.sessionWinner === seat ? '🏆 You Win!' : 'P' + store.sessionWinner + ' Wins!' }}</h2>
+      <h2>{{ store.sessionWinner === seat ? '🏆 You Win!' : playerName(store.sessionWinner!) + ' Wins!' }}</h2>
       <ul class="score-list">
         <li
           v-for="(score, i) in store.sessionScores"
           :key="i"
           :class="['score-row', scoreClass(score), { winner: i === store.sessionWinner }]"
         >
-          <span>{{ i === seat ? 'You (P' + i + ')' : 'P' + i }}</span>
+          <span>{{ i === seat ? 'You (' + playerName(i) + ')' : playerName(i) }}</span>
           <span class="score-value">{{ score > 0 ? '+' : '' }}{{ score }}</span>
         </li>
       </ul>

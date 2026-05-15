@@ -6,6 +6,7 @@ import HandComponent from '@/components/HandComponent.vue'
 import type { Card } from '@/engine/types'
 
 const store = useGameStore()
+// Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
 const { pick, pass, bury } = useGame()
 
