@@ -239,6 +239,31 @@ impl Game for Sheepshead {
     }
 
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
+        let n = tricks_by_player.len();
+
+        // ── Leaster ──────────────────────────────────────────────────────────────
+        if state.meta["leaster"].as_bool().unwrap_or(false) {
+            let raw: Vec<i32> = tricks_by_player
+                .iter()
+                .map(|tricks| {
+                    tricks
+                        .iter()
+                        .flat_map(|t| t.plays.iter().map(|(_, c)| self.card_points(*c) as i32))
+                        .sum()
+                })
+                .collect();
+            let max_pts = raw.iter().max().copied().unwrap_or(0);
+            let loser = raw.iter().position(|&p| p == max_pts).unwrap_or(0);
+            return (0..n)
+                .map(|i| if i == loser { -((n as i32) - 1) } else { 1 })
+                .collect();
+        }
+
+        let picker = state.meta["picker"].as_u64().unwrap_or(0) as usize;
+        let partner = state.meta["partner"].as_u64().map(|p| p as usize);
+        let going_alone = state.meta["going_alone"].as_bool().unwrap_or(false);
+
+        // Compute card points per player from tricks
         let raw: Vec<i32> = tricks_by_player
             .iter()
             .map(|tricks| {
@@ -249,22 +274,7 @@ impl Game for Sheepshead {
             })
             .collect();
 
-        let n = raw.len() as i32;
-
-        if state.meta["leaster"].as_bool().unwrap_or(false) {
-            // Leaster: the player with the most card points loses; all others gain 1 VP.
-            // Zero-sum: loser -(n-1), each winner +1.
-            let max_pts = raw.iter().max().copied().unwrap_or(0);
-            let loser = raw.iter().position(|&p| p == max_pts).unwrap_or(0);
-            return (0..raw.len())
-                .map(|i| if i == loser { -(n - 1) } else { 1 })
-                .collect();
-        }
-
-        let picker = state.meta["picker"].as_u64().unwrap_or(0) as usize;
-        let picker_points = raw[picker];
-
-        // Buried cards count toward the picker's total at scoring time.
+        // Buried cards count toward picker's total
         let buried_points: i32 = state.meta["buried"]
             .as_array()
             .unwrap_or(&vec![])
@@ -273,32 +283,74 @@ impl Game for Sheepshead {
             .map(|c| self.card_points(c) as i32)
             .sum();
 
-        let picker_total = picker_points + buried_points;
-        let defender_total = 120 - picker_total;
-        let picker_wins = picker_total > 60;
+        let picker_total = raw[picker] + buried_points;
 
-        // Schneider: the losing side has ≤30 card points.
-        let schneider = if picker_wins {
-            defender_total <= 30
+        // ── Going alone (1v4, double stakes) — also covers partner-never-revealed ─
+        if going_alone || partner.is_none() {
+            let defender_total = 120 - picker_total;
+            let picker_wins = picker_total > 60;
+            let schneider = if picker_wins {
+                defender_total <= 30
+            } else {
+                picker_total <= 30
+            };
+
+            return (0..n)
+                .map(|i| {
+                    if i == picker {
+                        match (picker_wins, schneider) {
+                            (true,  true)  =>  8,
+                            (true,  false) =>  4,
+                            (false, true)  => -8,
+                            (false, false) => -4,
+                        }
+                    } else {
+                        match (picker_wins, schneider) {
+                            (true,  true)  => -2,
+                            (true,  false) => -1,
+                            (false, true)  =>  2,
+                            (false, false) =>  1,
+                        }
+                    }
+                })
+                .collect();
+        }
+
+        // ── Called partner (2v3) ──────────────────────────────────────────────────
+        let partner_seat = partner.unwrap();
+        let team_total = picker_total + raw[partner_seat];
+        let team_wins = team_total > 60;
+        let opponent_total = 120 - team_total;
+        let schneider = if team_wins {
+            opponent_total <= 30
         } else {
-            picker_total <= 30
+            team_total <= 30
         };
 
-        // Base multiplier: 1 for a normal result, 2 when schneider.
-        // Zero-sum exchange model (n=5):
-        //   Normal win:      picker +(n-1),     each defender -1
-        //   Schneider win:   picker +2(n-1),    each defender -2
-        //   Normal loss:     picker -2(n-1),    each defender +2
-        //   Schneider loss:  picker -4(n-1),    each defender +4
-        let base = if schneider { 2_i32 } else { 1_i32 };
-        let defenders = n - 1;
-
-        (0..raw.len())
+        (0..n)
             .map(|i| {
                 if i == picker {
-                    if picker_wins { base * defenders } else { -(base * 2 * defenders) }
+                    match (team_wins, schneider) {
+                        (true,  true)  =>  4,
+                        (true,  false) =>  2,
+                        (false, true)  => -4,
+                        (false, false) => -2,
+                    }
+                } else if i == partner_seat {
+                    match (team_wins, schneider) {
+                        (true,  true)  =>  2,
+                        (true,  false) =>  1,
+                        (false, true)  => -2,
+                        (false, false) => -1,
+                    }
                 } else {
-                    if picker_wins { -base } else { base * 2 }
+                    // defender
+                    match (team_wins, schneider) {
+                        (true,  true)  => -2,
+                        (true,  false) => -1,
+                        (false, true)  =>  2,
+                        (false, false) =>  1,
+                    }
                 }
             })
             .collect()
@@ -830,6 +882,205 @@ mod tests {
             .flat_map(|t| t.plays.iter().map(|(_, c)| Sheepshead.card_points(*c)))
             .sum();
         assert_eq!(trick_total + buried_pts, 120);
+    }
+
+    // ── score_game helpers & tests ───────────────────────────────────────────
+
+    fn make_state_with_meta(meta: serde_json::Value) -> GameState {
+        let mut state = GameState::new(uuid::Uuid::nil(), "sheepshead".into(), 5, 0);
+        state.meta = meta;
+        state
+    }
+
+    fn make_trick(winner: usize, cards: Vec<(usize, Card)>) -> Trick {
+        let led_by = cards.first().map(|(s, _)| *s).unwrap_or(0);
+        let mut t = Trick::new(led_by);
+        t.plays = cards;
+        t.winner = Some(winner);
+        t
+    }
+
+    #[test]
+    fn going_alone_normal_win() {
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "sub_phase": "done", "passed": 0,
+            "going_alone": true, "called_suit": null, "partner": null,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),     // 11
+            (1, Card::new(Suit::Clubs, Rank::Ten)),     // 10
+            (1, Card::new(Suit::Spades, Rank::Ace)),    // 11
+            (1, Card::new(Suit::Spades, Rank::Ten)),    // 10
+            (1, Card::new(Suit::Hearts, Rank::Ace)),    // 11
+        ]));
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Hearts, Rank::Ten)),    // 10
+            (0, Card::new(Suit::Clubs, Rank::Seven)),   // 0
+            (2, Card::new(Suit::Clubs, Rank::Eight)),   // 0
+            (3, Card::new(Suit::Clubs, Rank::Nine)),    // 0
+            (4, Card::new(Suit::Spades, Rank::Seven)),  // 0
+        ]));
+        // Picker: 53+10=63; defenders: 120-63=57 (not schneider since >30)
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], 4, "picker wins alone: +4");
+        assert_eq!(scores[0], -1); assert_eq!(scores[2], -1);
+        assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn going_alone_schneider_win() {
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "sub_phase": "done", "passed": 0,
+            "going_alone": true, "called_suit": null, "partner": null,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
+            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
+            (1, Card::new(Suit::Hearts, Rank::Ace)),
+        ]));  // 53
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Hearts, Rank::Ten)),    (1, Card::new(Suit::Diamonds, Rank::Ace)),
+            (1, Card::new(Suit::Diamonds, Rank::Ten)),  (1, Card::new(Suit::Clubs, Rank::King)),
+            (1, Card::new(Suit::Spades, Rank::King)),
+        ]));  // 10+11+10+4+4 = 39 → total 92; defenders get 28 ≤ 30 → schneider
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], 8, "picker schneider win alone: +8");
+        assert_eq!(scores[0], -2); assert_eq!(scores[2], -2);
+        assert_eq!(scores[3], -2); assert_eq!(scores[4], -2);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn going_alone_normal_loss() {
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "sub_phase": "done", "passed": 0,
+            "going_alone": true, "called_suit": null, "partner": null,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
+            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
+            (1, Card::new(Suit::Hearts, Rank::Seven)),
+        ])); // 42
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], -4, "picker loses alone: -4");
+        assert_eq!(scores[0], 1); assert_eq!(scores[2], 1);
+        assert_eq!(scores[3], 1); assert_eq!(scores[4], 1);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn partner_2v3_normal_win() {
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
+            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)), (1, Card::new(Suit::Clubs, Rank::Ten)),
+            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
+            (1, Card::new(Suit::Hearts, Rank::Seven)),
+        ])); // 42
+        tbp[2].push(make_trick(2, vec![
+            (2, Card::new(Suit::Hearts, Rank::Ace)), (2, Card::new(Suit::Hearts, Rank::Ten)),
+        ])); // 21
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], 2, "picker wins 2v3: +2");
+        assert_eq!(scores[2], 1, "partner wins 2v3: +1");
+        assert_eq!(scores[0], -1); assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn partner_2v3_normal_loss() {
+        // Team total must be >30 (no schneider) but ≤60 (loss).
+        // picker(1) wins a trick worth 22 pts, partner(2) wins a trick worth 22 pts → team = 44.
+        // 44 > 30 (no schneider), 44 ≤ 60 (loss).
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
+            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        // picker gets 11+11=22 pts
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),    // 11
+            (1, Card::new(Suit::Spades, Rank::Ace)),   // 11
+            (0, Card::new(Suit::Hearts, Rank::Seven)), // 0
+            (3, Card::new(Suit::Hearts, Rank::Eight)), // 0
+            (4, Card::new(Suit::Hearts, Rank::Nine)),  // 0
+        ])); // picker: 22
+        // partner gets 11+11=22 pts
+        tbp[2].push(make_trick(2, vec![
+            (2, Card::new(Suit::Hearts, Rank::Ace)),   // 11
+            (2, Card::new(Suit::Spades, Rank::King)),  // 4
+            (0, Card::new(Suit::Clubs, Rank::Seven)),  // 0
+            (3, Card::new(Suit::Clubs, Rank::Eight)),  // 0
+            (4, Card::new(Suit::Clubs, Rank::Nine)),   // 0
+        ])); // partner: 15 → team = 22+15 = 37 > 30, ≤ 60 → normal loss
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], -2, "picker loses 2v3: -2");
+        assert_eq!(scores[2], -1, "partner loses 2v3: -1");
+        assert_eq!(scores[0], 1); assert_eq!(scores[3], 1); assert_eq!(scores[4], 1);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn partner_2v3_schneider_win() {
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
+            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
+            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
+            (1, Card::new(Suit::Hearts, Rank::Ace)),
+        ])); // 53
+        tbp[2].push(make_trick(2, vec![
+            (2, Card::new(Suit::Hearts, Rank::Ten)),   (2, Card::new(Suit::Diamonds, Rank::Ace)),
+            (2, Card::new(Suit::Diamonds, Rank::Ten)), (2, Card::new(Suit::Clubs, Rank::King)),
+            (2, Card::new(Suit::Spades, Rank::King)),
+        ])); // 39 → team: 92; defenders: 28 ≤ 30 → schneider
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], 4, "picker schneider win 2v3: +4");
+        assert_eq!(scores[2], 2, "partner schneider win 2v3: +2");
+        assert_eq!(scores[0], -2); assert_eq!(scores[3], -2); assert_eq!(scores[4], -2);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
+    }
+
+    #[test]
+    fn partner_never_revealed_scores_as_going_alone() {
+        // partner is null (ace never played) → treat as going alone
+        let state = make_state_with_meta(serde_json::json!({
+            "picker": 1_u64, "partner": null, "going_alone": false,
+            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
+            "buried": [], "leaster": false, "callable_suits": []
+        }));
+        let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
+            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
+            (1, Card::new(Suit::Hearts, Rank::Ace)),
+        ])); // 53
+        tbp[1].push(make_trick(1, vec![
+            (1, Card::new(Suit::Hearts, Rank::Ten)), (1, Card::new(Suit::Diamonds, Rank::Ace)),
+            (0, Card::new(Suit::Clubs, Rank::Seven)), (2, Card::new(Suit::Clubs, Rank::Eight)),
+            (3, Card::new(Suit::Clubs, Rank::Nine)),
+        ])); // 10+11=21 → picker total 74 > 60; defenders 46 > 30 → no schneider
+        let scores = Sheepshead.score_game(&tbp, &state);
+        assert_eq!(scores[1], 4, "partner null → going alone win: +4");
+        assert_eq!(scores[0], -1); assert_eq!(scores[2], -1);
+        assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     // ── trump & trick logic ──────────────────────────────────────────────────
