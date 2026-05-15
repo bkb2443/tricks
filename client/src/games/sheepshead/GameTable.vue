@@ -79,6 +79,7 @@ function trickOrdinal(n: number) {
     <!-- ── Current trick ───────────────────────────────────────── -->
     <trick-display
       :trick="state.current_trick"
+      :completed-trick="store.completedTrick"
       :my-seat="seat"
       :names="state.names ?? []"
       :picker-seat="store.picker"
