@@ -85,7 +85,9 @@ impl Room {
         };
 
         // Public: everyone sees the bid was placed; current_player tells clients whose turn is next.
-        self.broadcast(StateUpdate::BidPlaced { player: seat, value, current_player });
+        // Use broadcast_payload when the game provides a filtered view (e.g., bury → calling).
+        let bid_value = result.broadcast_payload.unwrap_or(value);
+        self.broadcast(StateUpdate::BidPlaced { player: seat, value: bid_value, current_player });
 
         // Private: send the affected player their updated hand
         if let Some(updated_seat) = result.hand_updated_seat {
@@ -107,13 +109,24 @@ impl Room {
     /// Validate and apply a card play from `seat`. On the final trick, broadcasts
     /// `HandComplete` (and `SessionOver` if someone won the session).
     pub fn play_card(&self, seat: usize, card: Card) -> Result<(), String> {
-        let result = {
+        let (result, newly_revealed_partner) = {
             let mut guard = self.state.lock().unwrap();
             let state = guard.as_mut().ok_or_else(|| "game not started".to_string())?;
-            self.game.apply_play(state, seat, card)?
+            let partner_was_null = state.meta["partner"].is_null();
+            let result = self.game.apply_play(state, seat, card)?;
+            let newly_revealed = if partner_was_null && !state.meta["partner"].is_null() {
+                state.meta["partner"].as_u64().map(|p| p as usize)
+            } else {
+                None
+            };
+            (result, newly_revealed)
         };
 
         self.broadcast(StateUpdate::CardPlayed { player: seat, card });
+
+        if let Some(partner_seat) = newly_revealed_partner {
+            self.broadcast(StateUpdate::PartnerRevealed { seat: partner_seat });
+        }
 
         match result {
             PlayResult::Continuing => {}

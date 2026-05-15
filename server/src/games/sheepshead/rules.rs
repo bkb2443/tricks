@@ -1,6 +1,6 @@
 use crate::engine::{
     BidResult, Card, DealResult, GamePhase, GameState, Rank, Suit, Trick,
-    game::{EffectiveSuit, Game},
+    game::{apply_play_generic, EffectiveSuit, Game},
 };
 
 pub struct Sheepshead;
@@ -151,6 +151,31 @@ impl Game for Sheepshead {
             "calling" => self.handle_call(state, seat, action, value),
             _ => Err(format!("unknown sub_phase '{sub_phase}'")),
         }
+    }
+
+    fn apply_play(
+        &self,
+        state: &mut GameState,
+        seat: usize,
+        card: Card,
+    ) -> Result<crate::engine::PlayResult, String> {
+        // Partner revelation: if the called ace is played while partner is unknown, reveal them
+        if state.meta["partner"].is_null()
+            && !state.meta["going_alone"].as_bool().unwrap_or(false)
+            && card.rank == Rank::Ace
+            && let Some(suit_str) = state.meta["called_suit"].as_str()
+        {
+            let suit_matches = match suit_str {
+                "clubs"  => card.suit == Suit::Clubs,
+                "spades" => card.suit == Suit::Spades,
+                "hearts" => card.suit == Suit::Hearts,
+                _        => false,
+            };
+            if suit_matches {
+                state.meta["partner"] = serde_json::json!(seat);
+            }
+        }
+        apply_play_generic(self, state, seat, card)
     }
 
     fn trump_rank(&self, card: Card, _state: &GameState) -> Option<u8> {
@@ -901,6 +926,37 @@ mod tests {
         assert_eq!(state.phase, GamePhase::Playing);
         assert_eq!(state.meta["called_suit"].as_str(), Some(suit_str.as_str()));
         assert_eq!(state.meta["going_alone"].as_bool(), Some(false));
+    }
+
+    #[test]
+    fn playing_called_ace_sets_partner_in_meta() {
+        // Set up a game where player 1 called a suit (if callable)
+        let (mut state, picker) = calling_state();
+        let callable = state.meta["callable_suits"].as_array().unwrap().clone();
+        if callable.is_empty() { return; } // no callable suit — skip
+
+        let suit_str = callable[0].as_str().unwrap().to_string();
+        Sheepshead
+            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}))
+            .unwrap();
+        assert_eq!(state.phase, GamePhase::Playing);
+
+        // Find which player holds the called ace
+        let called_suit: Suit = serde_json::from_str(&format!("\"{}\"", suit_str)).unwrap();
+        let ace = Card::new(called_suit, Rank::Ace);
+        let partner_seat = (0..5).find(|&s| state.hands[s].contains(&ace));
+        let Some(partner) = partner_seat else { return }; // ace may be in buried — skip
+
+        // Set current_player to partner so we can test the revelation directly
+        state.current_player = partner;
+        // Ensure there's no current trick (partner leads)
+        state.current_trick = None;
+        Sheepshead.apply_play(&mut state, partner, ace).unwrap();
+        assert_eq!(
+            state.meta["partner"].as_u64(),
+            Some(partner as u64),
+            "partner should be set when called ace is played"
+        );
     }
 
     #[test]

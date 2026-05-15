@@ -49,6 +49,83 @@ pub enum PlayResult {
 // Trait
 // ---------------------------------------------------------------------------
 
+/// Shared trick-taking logic. Used by the default `apply_play` and by game implementations
+/// that need pre/post hooks (e.g., Sheepshead partner revelation).
+pub fn apply_play_generic(
+    game: &dyn Game,
+    state: &mut GameState,
+    seat: usize,
+    card: Card,
+) -> Result<PlayResult, String> {
+    if state.phase != GamePhase::Playing {
+        return Err("game is not in the playing phase".into());
+    }
+    if state.current_player != seat {
+        return Err(format!(
+            "it is player {}'s turn, not player {seat}",
+            state.current_player
+        ));
+    }
+    if !state.hands[seat].contains(&card) {
+        return Err(format!("{card} is not in your hand"));
+    }
+
+    // Open a new trick when the player is leading
+    if state.current_trick.is_none() {
+        state.current_trick = Some(Trick::new(seat));
+    }
+
+    // Legality check — clone to avoid a simultaneous borrow of state
+    let legal = {
+        let hand = state.hands[seat].clone();
+        let trick = state.current_trick.as_ref().unwrap().clone();
+        game.legal_plays(&hand, &trick, state)
+    };
+    if !legal.contains(&card) {
+        return Err(format!("{card} is not a legal play"));
+    }
+
+    // Remove from hand, add to trick
+    let pos = state.hands[seat].iter().position(|c| *c == card).unwrap();
+    state.hands[seat].remove(pos);
+    state.current_trick.as_mut().unwrap().plays.push((seat, card));
+
+    // Not yet complete — advance to the next player in trick order
+    let player_count = state.player_count;
+    let plays_so_far = state.current_trick.as_ref().unwrap().plays.len();
+    if plays_so_far < player_count {
+        let led_by = state.current_trick.as_ref().unwrap().led_by;
+        state.current_player = (led_by + plays_so_far) % player_count;
+        return Ok(PlayResult::Continuing);
+    }
+
+    // Trick is complete
+    let trick = state.current_trick.take().unwrap();
+    let winner_idx = game.trick_winner(&trick, state);
+    let winner_seat = trick.plays[winner_idx].0;
+    let points: u8 = trick.plays.iter().map(|(_, c)| game.card_points(*c)).sum();
+
+    let mut completed = trick;
+    completed.winner = Some(winner_seat);
+    state.completed_tricks.push(completed);
+    state.current_player = winner_seat;
+
+    // Game ends when every hand is empty
+    if state.hands.iter().all(|h| h.is_empty()) {
+        let tbp = state.tricks_by_player();
+        let scores = game.score_game(&tbp, state);
+        state.scores = scores.clone();
+        state.phase = GamePhase::Scoring;
+        return Ok(PlayResult::GameOver {
+            last_trick_winner: winner_seat,
+            last_trick_points: points,
+            scores,
+        });
+    }
+
+    Ok(PlayResult::TrickComplete { winner: winner_seat, points })
+}
+
 /// Every trick-taking game implements this trait. The engine calls through it;
 /// no game-specific logic leaks into the engine layer.
 #[allow(dead_code)]
