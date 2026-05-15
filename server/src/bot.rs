@@ -161,7 +161,24 @@ pub fn play_card(state: &GameState, seat: usize, game: &dyn Game) -> Option<Card
 
 // ---- stubs to be replaced in Tasks 2-5 ----
 
-fn should_pick(_hand: &[Card], _state: &GameState, _game: &dyn Game) -> bool { false }
+fn should_pick(hand: &[Card], state: &GameState, game: &dyn Game) -> bool {
+    let qj_pts: u8 = hand.iter().map(|c| match c.rank {
+        Rank::Queen => 3,
+        Rank::Jack => 2,
+        _ => 0,
+    }).sum();
+
+    if qj_pts < 7 {
+        return false;
+    }
+
+    // Must have at least one non-face trump (a diamond that isn't Q/J)
+    hand.iter().any(|c| {
+        c.rank != Rank::Queen
+            && c.rank != Rank::Jack
+            && game.trump_rank(*c, state).is_some()
+    })
+}
 fn choose_bury(hand: &[Card], _state: &GameState, _game: &dyn Game) -> Vec<Card> {
     let mut h = hand.to_vec();
     h.sort_by_key(|c| point_value(*c));
@@ -219,5 +236,56 @@ mod tests {
         use crate::engine::game::EffectiveSuit;
         assert!(bs.known_voids.get(&1)
             .map_or(false, |v| v.contains(&EffectiveSuit::Plain(Suit::Clubs))));
+    }
+
+    fn hand_from(cards: &[(Suit, Rank)]) -> Vec<Card> {
+        cards.iter().map(|&(s, r)| Card::new(s, r)).collect()
+    }
+
+    fn base_state() -> GameState {
+        use uuid::Uuid;
+        GameState::new(Uuid::new_v4(), "sheepshead".into(), 5, 0)
+    }
+
+    #[test]
+    fn pick_threshold_exactly_7() {
+        // Q♣(3) + J♠(2) + J♥(2) = 7 — should pick
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),
+            (Suit::Spades, Rank::Jack),
+            (Suit::Hearts, Rank::Jack),
+            (Suit::Clubs, Rank::Ace),    // fail ace
+            (Suit::Spades, Rank::Ace),   // fail ace
+            (Suit::Diamonds, Rank::Nine), // non-face trump (secondary check)
+        ]);
+        assert!(should_pick(&hand, &base_state(), &sheepshead()));
+    }
+
+    #[test]
+    fn pick_threshold_below_7_fails() {
+        // Q♣(3) + J♠(2) = 5 — should pass
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),
+            (Suit::Spades, Rank::Jack),
+            (Suit::Clubs, Rank::Ace),
+            (Suit::Spades, Rank::Ace),
+            (Suit::Hearts, Rank::Ace),
+            (Suit::Diamonds, Rank::Nine),
+        ]);
+        assert!(!should_pick(&hand, &base_state(), &sheepshead()));
+    }
+
+    #[test]
+    fn pick_requires_non_face_trump() {
+        // Q♣(3) + Q♠(3) + J♠(2) = 8 but no non-face trump — should pass
+        let hand = hand_from(&[
+            (Suit::Clubs, Rank::Queen),
+            (Suit::Spades, Rank::Queen),
+            (Suit::Spades, Rank::Jack),
+            (Suit::Clubs, Rank::Ace),
+            (Suit::Clubs, Rank::Ten),
+            (Suit::Clubs, Rank::King),
+        ]);
+        assert!(!should_pick(&hand, &base_state(), &sheepshead()));
     }
 }
