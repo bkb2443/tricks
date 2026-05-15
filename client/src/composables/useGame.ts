@@ -42,5 +42,13 @@ export function useGame() {
     sendMessage({ type: 'bid', value: { action: 'bury', cards } })
   }
 
-  return { store, connected, createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury }
+  function callAce(suit: string): void {
+    sendMessage({ type: 'bid', value: { action: 'call', suit } })
+  }
+
+  function goAlone(): void {
+    sendMessage({ type: 'bid', value: { action: 'go_alone' } })
+  }
+
+  return { store, connected, createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone }
 }

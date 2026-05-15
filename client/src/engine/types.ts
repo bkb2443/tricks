@@ -65,3 +65,4 @@ export type StateUpdate =
   | { type: 'hand_updated';   hand: Card[] }
   | { type: 'phase_changed';  phase: GamePhase }
   | { type: 'error';          message: string }
+  | { type: 'partner_revealed'; seat: number }

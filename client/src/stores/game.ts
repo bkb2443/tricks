@@ -14,6 +14,7 @@ export const useGameStore = defineStore('game', () => {
   const sessionScores = ref<number[]>([])
   const sessionWinner = ref<number | null>(null)
   const completedTrick = ref<Trick | null>(null)
+  const partnerRevealedSeat = ref<number | null>(null)
   let pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -35,6 +36,20 @@ export const useGameStore = defineStore('game', () => {
 
   /** True once all seats are filled and the server has sent the first Snapshot. */
   const gameStarted = computed(() => gameState.value !== null)
+
+  const isCallingPhase = computed(() =>
+    gameState.value?.meta?.sub_phase === 'calling' && gameState.value?.phase === 'bidding'
+  )
+
+  const callableSuits = computed<string[]>(() => {
+    const cs = gameState.value?.meta?.callable_suits
+    return Array.isArray(cs) ? (cs as string[]) : []
+  })
+
+  const calledSuit = computed<string | null>(() => {
+    const cs = gameState.value?.meta?.called_suit
+    return typeof cs === 'string' ? cs : null
+  })
 
   /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress. */
   const currentTrickWinner = computed<number>(() => {
@@ -137,6 +152,14 @@ export const useGameStore = defineStore('game', () => {
         sessionWinner.value = update.winner
         break
 
+      case 'partner_revealed':
+        if (gameState.value) {
+          gameState.value.meta = { ...gameState.value.meta, partner: update.seat }
+        }
+        partnerRevealedSeat.value = update.seat
+        setTimeout(() => { partnerRevealedSeat.value = null }, 2000)
+        break
+
       case 'error':
         error.value = update.message
         break
@@ -153,14 +176,17 @@ export const useGameStore = defineStore('game', () => {
     sessionScores.value = []
     sessionWinner.value = null
     completedTrick.value = null
+    partnerRevealedSeat.value = null
     if (pauseTimer !== null) { clearTimeout(pauseTimer); pauseTimer = null }
   }
 
   return {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
+    partnerRevealedSeat,
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
+    isCallingPhase, callableSuits, calledSuit,
     // actions
     handleUpdate, reset,
   }
