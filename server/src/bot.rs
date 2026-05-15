@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::engine::{Card, GameState, Rank, Trick};
 use crate::engine::game::{EffectiveSuit, Game};
+use crate::games::sheepshead::Sheepshead;
 
 // ---------------------------------------------------------------------------
 // BotState — derived fresh from GameState on every decision
@@ -71,6 +72,7 @@ fn trick_points(trick: &Trick, game: &dyn Game) -> u8 {
 /// Winner seat of a partial or complete trick (does not require trick to be full).
 #[allow(dead_code)]
 fn current_winner(trick: &Trick, game: &dyn Game, state: &GameState) -> usize {
+    debug_assert!(!trick.plays.is_empty(), "current_winner called on empty trick");
     let mut best = 0usize;
     let mut best_trump = game.trump_rank(trick.plays[0].1, state);
     let led_suit = game.effective_suit(trick.plays[0].1, state);
@@ -119,6 +121,7 @@ fn min_winning_trump(candidates: &[Card], trick: &Trick, game: &dyn Game, state:
 // ---------------------------------------------------------------------------
 
 /// Bid JSON the bot should submit.
+// FIXME: bid logic is hardcoded to Sheepshead; needs game: &dyn Game param when second game is added
 pub fn bid_action(state: &GameState, seat: usize) -> serde_json::Value {
     if state.meta["picker"].is_null() {
         // Pick/pass sub-phase
@@ -170,8 +173,6 @@ fn choose_lead(hand: &[Card], _seat: usize, _state: &GameState, _bs: &BotState, 
 fn choose_follow(legal: &[Card], _seat: usize, _trick: &Trick, _state: &GameState, _bs: &BotState, _game: &dyn Game) -> Card {
     legal[0]
 }
-
-use crate::games::sheepshead::Sheepshead;
 
 #[cfg(test)]
 mod tests {
