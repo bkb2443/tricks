@@ -77,6 +77,7 @@ impl GameState {
     }
 
     /// Creates a GameState in Lobby phase (no hands dealt yet).
+    #[allow(dead_code)]
     pub fn new_lobby(
         game_id: Uuid,
         game_name: String,

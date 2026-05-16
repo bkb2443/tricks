@@ -8,6 +8,7 @@ use crate::engine::game::Game;
 
 pub struct Room {
     pub id: Uuid,
+    pub room_code: String,
     pub game_name: String,
     pub player_count: usize,
     pub victory_goal: i32,
@@ -31,6 +32,7 @@ impl Room {
         player_count: usize,
         game: Box<dyn Game>,
         victory_goal: i32,
+        room_code: String,
     ) -> Self {
         let (broadcast_tx, _) = broadcast::channel(64);
         let player_txs = (0..player_count).map(|_| None).collect();
@@ -38,6 +40,7 @@ impl Room {
         let session_scores = Mutex::new(vec![0; player_count]);
         Self {
             id,
+            room_code,
             game_name,
             player_count,
             victory_goal,

@@ -21,6 +21,8 @@ async fn main() {
         .init();
 
     let lobby = Arc::new(lobby::Lobby::new());
+    let mm = Arc::new(lobby::Matchmaker::new(Arc::clone(&lobby)));
+    lobby.matchmaker.set(mm).ok();
 
     let app = Router::new()
         .route("/ws", get(ws::handler::upgrade))

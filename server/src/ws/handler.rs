@@ -91,13 +91,15 @@ fn route(
     match msg {
         ClientMessage::JoinRoom { room_id, game, players, fill_bots } => {
             let room = match room_id {
-                Some(id) => lobby.get_room(id).or_else(|| lobby.create_room(game, players, 24))?,
-                None => lobby.create_room(game, players, 24)?,
+                Some(ref id) => lobby.get_room(&id.to_string()).or_else(|| {
+                    lobby.create_room(game, players, 24).map(|(_, r)| r)
+                })?,
+                None => lobby.create_room(game, players, 24).map(|(_, r)| r)?,
             };
             match room.join(player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
-                    tracing::info!(room_id = %room.id, seat, "player joined");
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat };
+                    tracing::info!(room_id = %room.id, room_code = %room.room_code, seat, "player joined");
+                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code: room.room_code.clone() };
                     if fill_bots {
                         room.fill_bots();
                         let room_arc = Arc::clone(&room);
@@ -122,6 +124,10 @@ fn route(
                 }
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
+        }
+
+        ClientMessage::CreateRoom { .. } | ClientMessage::Join { .. } => {
+            Some(StateUpdate::Error { message: "not yet implemented".into() })
         }
 
         ClientMessage::PlayCard { card } => {
