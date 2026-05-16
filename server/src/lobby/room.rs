@@ -84,7 +84,7 @@ pub struct Room {
     session_scores: Mutex<Vec<i32>>,
     bots_running: AtomicBool,
     chat_history: Mutex<VecDeque<(String, String, u64)>>, // (from, text, timestamp_ms)
-    max_hands: Option<u32>,
+    max_hands: Mutex<Option<u32>>,
     hands_played: Mutex<u32>,
 }
 
@@ -120,13 +120,13 @@ impl Room {
             session_scores: Mutex::new(vec![0; player_count]),
             bots_running: AtomicBool::new(false),
             chat_history: Mutex::new(VecDeque::new()),
-            max_hands: None,
+            max_hands: Mutex::new(None),
             hands_played: Mutex::new(0),
         }
     }
 
-    pub fn set_max_hands(&mut self, max: u32) {
-        self.max_hands = Some(max);
+    pub fn set_max_hands(&self, max: u32) {
+        *self.max_hands.lock().unwrap() = Some(max);
     }
 
     // ── Seat info ─────────────────────────────────────────────────────────────
@@ -492,7 +492,7 @@ impl Room {
                     session_scores: session_scores.clone(),
                 });
 
-                if self.max_hands.is_some_and(|max| hands_done >= max) {
+                if (*self.max_hands.lock().unwrap()).is_some_and(|max| hands_done >= max) {
                     let winner = self.session_winner(&session_scores).unwrap_or(0);
                     self.broadcast(StateUpdate::SessionOver {
                         winner,
@@ -538,7 +538,7 @@ impl Room {
             if phase == GamePhase::Scoring {
                 let session_scores = self.session_scores.lock().unwrap().clone();
                 let hands_done = *self.hands_played.lock().unwrap();
-                let session_over = self.max_hands.is_some_and(|max| hands_done >= max)
+                let session_over = (*self.max_hands.lock().unwrap()).is_some_and(|max| hands_done >= max)
                     || self.session_winner(&session_scores).is_some();
                 if session_over { break; }
                 tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;

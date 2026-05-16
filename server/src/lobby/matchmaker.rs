@@ -3,7 +3,7 @@
 
 use std::mem;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -18,13 +18,11 @@ struct QueueEntry {
     name: String,
     tx: mpsc::Sender<StateUpdate>,
     ws_id: Uuid,
-    joined_at: Instant,
 }
 
 pub struct Matchmaker {
     queue: Mutex<Vec<QueueEntry>>,
     lobby: Arc<Lobby>,
-    timer_running: Mutex<bool>,
 }
 
 impl Matchmaker {
@@ -32,7 +30,6 @@ impl Matchmaker {
         Self {
             queue: Mutex::new(Vec::new()),
             lobby,
-            timer_running: Mutex::new(false),
         }
     }
 
@@ -41,7 +38,7 @@ impl Matchmaker {
         let should_start_timer;
         {
             let mut q = self.queue.lock().unwrap();
-            q.push(QueueEntry { name, tx: tx.clone(), ws_id, joined_at: Instant::now() });
+            q.push(QueueEntry { name, tx: tx.clone(), ws_id });
             position = q.len();
             should_start_timer = position == 1;
 
@@ -84,21 +81,22 @@ impl Matchmaker {
             return;
         };
 
-        // Set public room properties in state meta
+        // Set public room limits
+        room.set_max_hands(PUBLIC_MAX_HANDS);
         {
             let mut guard = room.state.lock().unwrap();
             if let Some(ref mut state) = *guard {
-                state.meta["max_hands"] = serde_json::json!(PUBLIC_MAX_HANDS);
                 state.meta["room_type"] = serde_json::json!("public");
             }
         }
 
         // Assign human players to seats
+        let room_id = room.id;
         for entry in entries {
             let result = room.join_lobby(entry.name, entry.ws_id, entry.tx.clone());
             let Some((seat, _broadcast_rx)) = result else { continue };
             let _ = entry.tx.try_send(StateUpdate::JoinedRoom {
-                room_id: uuid::Uuid::nil(),
+                room_id,
                 seat,
                 room_code: code.clone(),
             });
