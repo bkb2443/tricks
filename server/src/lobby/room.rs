@@ -193,7 +193,11 @@ impl Room {
             }
         }
 
-        self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
+        // Send seat update privately to the joiner (they subscribe to broadcast after this call,
+        // so they'd miss the broadcast version), then broadcast to other players already in the room.
+        let seat_infos = self.seat_infos();
+        let _ = tx.try_send(StateUpdate::SeatUpdate { seats: seat_infos.clone() });
+        self.broadcast(StateUpdate::SeatUpdate { seats: seat_infos });
         tracing::info!(room_code = %self.room_code, seat, name, "player joined lobby");
 
         Some((seat, self.broadcast_tx.subscribe()))
