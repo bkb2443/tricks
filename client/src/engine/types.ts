@@ -1,6 +1,4 @@
 // These types mirror the Rust server structs exactly.
-// Suit/Rank values are the serde(rename_all = "lowercase") serialisations.
-
 export type Suit = 'clubs' | 'spades' | 'hearts' | 'diamonds'
 
 export type Rank =
@@ -8,12 +6,15 @@ export type Rank =
   | 'seven' | 'eight' | 'nine' | 'ten'
   | 'jack' | 'queen' | 'king' | 'ace'
 
-export interface Card {
-  suit: Suit
-  rank: Rank
-}
+export interface Card { suit: Suit; rank: Rank }
 
-export type GamePhase = 'bidding' | 'playing' | 'scoring'
+export type GamePhase = 'lobby' | 'bidding' | 'playing' | 'scoring'
+
+export interface SeatInfo {
+  seat: number
+  state: 'empty' | 'human' | 'bot' | 'disconnected'
+  name: string | null
+}
 
 export interface Trick {
   led_by: number
@@ -28,41 +29,40 @@ export interface GameState {
   player_count: number
   dealer: number
   current_player: number
-  /** Only `hands[mySeat]` is populated; the rest are empty arrays. */
   hands: Card[][]
-  /** Hidden from clients (e.g. blind) — always empty in received snapshots. */
   extra_piles: [string, Card[]][]
   current_trick: Trick | null
   completed_tricks: Trick[]
   scores: number[]
-  /** Game-specific metadata (opaque; typed per-game where needed). */
   meta: Record<string, unknown>
-  /** Display name for each seat index. May be empty array on old server versions. */
   names: string[]
 }
 
-// ---------------------------------------------------------------------------
-// Messages: client → server
-// ---------------------------------------------------------------------------
-
 export type ClientMessage =
   | { type: 'join_room'; room_id?: string; game: string; players: number; fill_bots?: boolean }
+  | { type: 'create_room'; name: string; game: string; max_hands: number | null }
+  | { type: 'join'; name: string; room_code: string }
   | { type: 'play_card'; card: Card }
   | { type: 'bid'; value: unknown }
-
-// ---------------------------------------------------------------------------
-// Messages: server → client
-// ---------------------------------------------------------------------------
+  | { type: 'lobby_chat'; text: string }
+  | { type: 'start_game' }
+  | { type: 'force_bot'; seat: number }
+  | { type: 'extend_rejoin'; seat: number }
+  | { type: 'join_queue' }
+  | { type: 'leave_queue' }
 
 export type StateUpdate =
-  | { type: 'joined_room';    room_id: string; seat: number }
-  | { type: 'snapshot';       state: GameState }
-  | { type: 'card_played';    player: number; card: Card }
-  | { type: 'trick_complete'; winner: number; points: number }
-  | { type: 'hand_complete';  hand_scores: number[]; session_scores: number[] }
-  | { type: 'session_over';   winner: number; final_scores: number[] }
-  | { type: 'bid_placed';     player: number; value: unknown; current_player: number }
-  | { type: 'hand_updated';   hand: Card[] }
-  | { type: 'phase_changed';  phase: GamePhase }
-  | { type: 'error';          message: string }
+  | { type: 'joined_room';     room_id: string; seat: number; room_code: string }
+  | { type: 'snapshot';        state: GameState }
+  | { type: 'card_played';     player: number; card: Card }
+  | { type: 'trick_complete';  winner: number; points: number }
+  | { type: 'hand_complete';   hand_scores: number[]; session_scores: number[] }
+  | { type: 'session_over';    winner: number; final_scores: number[] }
+  | { type: 'bid_placed';      player: number; value: unknown; current_player: number }
+  | { type: 'hand_updated';    hand: Card[] }
+  | { type: 'phase_changed';   phase: GamePhase }
   | { type: 'partner_revealed'; seat: number }
+  | { type: 'lobby_chat';      from: string; text: string; timestamp: number }
+  | { type: 'seat_update';     seats: SeatInfo[] }
+  | { type: 'queue_status';    position: number; waiting_since: number }
+  | { type: 'error';           message: string }

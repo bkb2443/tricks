@@ -6,9 +6,18 @@ use crate::engine::{Card, Trick};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GamePhase {
+    Lobby,
     Bidding,
     Playing,
     Scoring,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeatInfo {
+    pub seat: usize,
+    /// "empty" | "human" | "bot" | "disconnected"
+    pub state: String,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +75,36 @@ impl GameState {
             names: Vec::new(),
         }
     }
+
+    /// Creates a GameState in Lobby phase (no hands dealt yet).
+    pub fn new_lobby(
+        game_id: Uuid,
+        game_name: String,
+        player_count: usize,
+        room_type: &str,
+        max_hands: Option<u32>,
+    ) -> Self {
+        Self {
+            game_id,
+            game_name,
+            phase: GamePhase::Lobby,
+            player_count,
+            dealer: 0,
+            current_player: 0,
+            hands: vec![Vec::new(); player_count],
+            extra_piles: Vec::new(),
+            current_trick: None,
+            completed_tricks: Vec::new(),
+            scores: vec![0; player_count],
+            meta: serde_json::json!({
+                "host_seat": null,
+                "countdown_ends_at": null,
+                "room_type": room_type,
+                "max_hands": max_hands
+            }),
+            names: Vec::new(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +117,10 @@ pub enum ClientMessage {
     /// Join an existing room by ID, or create a new one (omit room_id).
     /// Set `fill_bots: true` to have the server fill remaining seats with bots (useful for local dev).
     JoinRoom { room_id: Option<Uuid>, game: String, players: usize, #[serde(default)] fill_bots: bool },
+    /// Multiplayer: create a new private room and join it as host.
+    CreateRoom { name: String, game: String, max_hands: Option<u32> },
+    /// Multiplayer: join an existing room by short code.
+    Join { name: String, room_code: String },
     /// Play a card during the Playing phase.
     PlayCard { card: Card },
     /// Generic bid payload; shape is game-specific.
@@ -93,7 +136,7 @@ pub enum ClientMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StateUpdate {
     /// Sent immediately after a successful JoinRoom. Tells the client its seat index.
-    JoinedRoom { room_id: Uuid, seat: usize },
+    JoinedRoom { room_id: Uuid, seat: usize, room_code: String },
     /// Full state snapshot sent once dealing is complete. Only `hands[seat]` is
     /// populated; other hands are empty. `extra_piles` is also cleared (blind is hidden).
     Snapshot { state: GameState },
@@ -112,5 +155,11 @@ pub enum StateUpdate {
     PhaseChanged { phase: GamePhase },
     /// Broadcast when a partner is revealed (e.g., Sheepshead partner mechanics).
     PartnerRevealed { seat: usize },
+    /// Lobby chat message broadcast to all players.
+    LobbyChat { from: String, text: String, timestamp: u64 },
+    /// Seat status update broadcast to all players in the lobby.
+    SeatUpdate { seats: Vec<SeatInfo> },
+    /// Queue status for waiting players.
+    QueueStatus { position: usize, waiting_since: u64 },
     Error { message: String },
 }
