@@ -37,35 +37,35 @@ describe('game store', () => {
 
   it('handles joined_room', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'abc-123', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'abc-123', seat: 2, room_code: 'TEST01' })
     expect(store.roomId).toBe('abc-123')
     expect(store.seat).toBe(2)
   })
 
   it('populates myHand from snapshot for own seat', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ hands: [[], [ACE_CLUBS], [], [], []] }) })
     expect(store.myHand).toEqual([ACE_CLUBS])
   })
 
   it('isMyTurn when current_player matches seat', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ current_player: 1 }) })
     expect(store.isMyTurn).toBe(true)
   })
 
   it('isMyTurn is false when current_player differs from seat', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 3 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 3, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ current_player: 1 }) })
     expect(store.isMyTurn).toBe(false)
   })
 
   it('hand_updated replaces myHand', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'hand_updated', hand: [KING_CLUBS] })
     expect(store.myHand).toEqual([KING_CLUBS])
   })
@@ -74,7 +74,7 @@ describe('game store', () => {
 
   it('card_played creates a new trick when none exists', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing' }) })
     store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS })
     expect(store.gameState?.current_trick?.plays).toHaveLength(1)
@@ -83,7 +83,7 @@ describe('game store', () => {
 
   it('card_played appends to an in-progress trick', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({
@@ -99,7 +99,7 @@ describe('game store', () => {
   // becomes true when it reaches the human — previously it was never updated.
   it('card_played by another player advances current_player', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 1 }) })
 
     store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS })
@@ -112,7 +112,7 @@ describe('game store', () => {
   it('isMyTurn becomes true once current_player advances to human seat', () => {
     const store = useGameStore()
     // Human is seat 2; trick led by seat 0 (a bot)
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 0 }) })
 
     expect(store.isMyTurn).toBe(false)
@@ -125,7 +125,7 @@ describe('game store', () => {
   // BUG FIX: played card must disappear from myHand — previously it remained.
   it('card_played for own card removes it from myHand', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({ phase: 'playing', current_player: 1, hands: [[], [ACE_CLUBS, KING_CLUBS], [], [], []] }),
@@ -139,7 +139,7 @@ describe('game store', () => {
 
   it('card_played for another player does not change myHand', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({ phase: 'playing', hands: [[], [ACE_CLUBS], [], [], []] }),
@@ -153,7 +153,7 @@ describe('game store', () => {
   it('card_played does not update current_player after the last play in a trick', () => {
     // All 5 players have played — trick_complete will set current_player, not card_played.
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({
@@ -177,7 +177,7 @@ describe('game store', () => {
 
   it('trick_complete moves trick to completed, clears current, sets current_player', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({
@@ -203,7 +203,7 @@ describe('game store', () => {
   // true when bots have all passed and it reaches the human's picking turn.
   it('bid_placed updates current_player', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ current_player: 1 }) })
 
     store.handleUpdate({ type: 'bid_placed', player: 1, value: { action: 'pass' }, current_player: 2 })
@@ -214,7 +214,7 @@ describe('game store', () => {
   it('isMyTurn becomes true once bots have passed and bid_placed reaches human seat', () => {
     const store = useGameStore()
     // Dealer = 4, so picking order is 0 → 1 → 2 → 3 → 4; human is seat 3
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 3 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 3, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ dealer: 4, current_player: 0 }) })
 
     expect(store.isMyTurn).toBe(false)
@@ -228,7 +228,7 @@ describe('game store', () => {
 
   it('bid_placed for pick keeps current_player on picker for bury sub-phase', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ current_player: 2 }) })
 
     // Human picks; server keeps current_player = 2 (picker must bury next)
@@ -239,7 +239,7 @@ describe('game store', () => {
 
   it('bid_placed for bury advances current_player to first trick leader', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({ dealer: 1, current_player: 2, meta: { picker: 2, passed: 0, buried: [], leaster: false } }),
@@ -254,7 +254,7 @@ describe('game store', () => {
 
   it('phase_changed updates the phase', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'bidding' }) })
     store.handleUpdate({ type: 'phase_changed', phase: 'playing' })
     expect(store.phase).toBe('playing')
@@ -264,7 +264,7 @@ describe('game store', () => {
 
   it('hand_complete updates hand scores and session scores', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState() })
     store.handleUpdate({
       type: 'hand_complete',
@@ -294,14 +294,14 @@ describe('game store', () => {
 
   it('picker computed returns null before pick', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState() })
     expect(store.picker).toBeNull()
   })
 
   it('picker computed returns seat after meta.picker is set', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
       state: makeState({ meta: { picker: 1, passed: 0, buried: [], leaster: false } }),
@@ -312,7 +312,7 @@ describe('game store', () => {
 
   it('reset clears all state including isSolo', () => {
     const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2 })
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.isSolo = true
     store.reset()
     expect(store.roomId).toBeNull()

@@ -50,5 +50,43 @@ export function useGame() {
     sendMessage({ type: 'bid', value: { action: 'go_alone' } })
   }
 
-  return { store, connected, createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone }
+  function joinWithCode(name: string, roomCode: string): void {
+    store.isSolo = false
+    sendMessage({ type: 'join', name, room_code: roomCode })
+  }
+
+  function createPrivateRoom(game: string, maxHands: number | null, name: string): void {
+    store.isSolo = false
+    sendMessage({ type: 'create_room', name, game, max_hands: maxHands })
+  }
+
+  function joinQueue(): void {
+    sendMessage({ type: 'join_queue' })
+  }
+
+  function leaveQueue(): void {
+    sendMessage({ type: 'leave_queue' })
+  }
+
+  function startGame(): void {
+    sendMessage({ type: 'start_game' })
+  }
+
+  function sendLobbyChat(text: string): void {
+    sendMessage({ type: 'lobby_chat', text })
+  }
+
+  function forceBot(seat: number): void {
+    sendMessage({ type: 'force_bot', seat })
+  }
+
+  function extendRejoin(seat: number): void {
+    sendMessage({ type: 'extend_rejoin', seat })
+  }
+
+  return {
+    store, connected,
+    createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
+    joinWithCode, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
+  }
 }
