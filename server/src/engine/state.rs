@@ -126,6 +126,18 @@ pub enum ClientMessage {
     PlayCard { card: Card },
     /// Generic bid payload; shape is game-specific.
     Bid { value: serde_json::Value },
+    /// Send a chat message in the lobby.
+    LobbyChat { text: String },
+    /// Host starts the game from the lobby.
+    StartGame,
+    /// Host forces a disconnected seat to become a bot.
+    ForceBot { seat: usize },
+    /// Host extends the rejoin window for a disconnected seat by 30 seconds.
+    ExtendRejoin { seat: usize },
+    /// Join the public matchmaking queue.
+    JoinQueue,
+    /// Leave the public matchmaking queue.
+    LeaveQueue,
 }
 
 // ---------------------------------------------------------------------------
