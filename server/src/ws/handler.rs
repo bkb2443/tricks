@@ -111,6 +111,9 @@ fn route(
     match msg {
         // ── Legacy solo path ─────────────────────────────────────────────────
         ClientMessage::JoinRoom { room_id, game, players, fill_bots } => {
+            if ctx.is_some() {
+                return Some(StateUpdate::Error { message: "already in a room".into() });
+            }
             let room = match room_id {
                 Some(ref id) => lobby.get_room(&id.to_string()).or_else(|| {
                     lobby.create_room(game, players, 24).map(|(_, r)| r)
@@ -135,6 +138,9 @@ fn route(
 
         // ── Multiplayer: create a new private room ────────────────────────────
         ClientMessage::CreateRoom { name, game, max_hands } => {
+            if ctx.is_some() {
+                return Some(StateUpdate::Error { message: "already in a room".into() });
+            }
             let (code, room) = match lobby.create_room(game, 5, 24) {
                 Some(r) => r,
                 None => return Some(StateUpdate::Error { message: "unknown game".into() }),
@@ -154,6 +160,9 @@ fn route(
 
         // ── Multiplayer: join existing room by short code ─────────────────────
         ClientMessage::Join { name, room_code } => {
+            if ctx.is_some() {
+                return Some(StateUpdate::Error { message: "already in a room".into() });
+            }
             let room = match lobby.get_room(&room_code) {
                 Some(r) => r,
                 None => return Some(StateUpdate::Error {
