@@ -56,6 +56,7 @@ impl Lobby {
             game,
             victory_goal,
             code.clone(),
+            "private".into(),
         ));
         self.rooms.insert(code.clone(), Arc::clone(&room));
         Some((code, room))

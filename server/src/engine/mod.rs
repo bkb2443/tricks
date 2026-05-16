@@ -7,5 +7,5 @@ pub mod trick;
 pub use card::{Card, Rank, Suit};
 pub use dealer::deal_game;
 pub use game::{BidResult, DealResult, Game, PlayResult};
-pub use state::{ClientMessage, GamePhase, GameState, StateUpdate};
+pub use state::{ClientMessage, GamePhase, GameState, SeatInfo, StateUpdate};
 pub use trick::Trick;
