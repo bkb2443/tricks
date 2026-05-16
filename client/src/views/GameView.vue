@@ -9,26 +9,13 @@ const notInRoom = computed(() => store.roomId === null)
 </script>
 
 <template>
-  <!-- No room → redirect back to lobby -->
   <div v-if="notInRoom" class="center">
     <p>You haven't joined a room yet.</p>
-    <router-link to="/"><button>Back to Lobby</button></router-link>
+    <router-link to="/"><button>Back to Home</button></router-link>
   </div>
-
-  <!-- In room, waiting for all players to connect -->
-  <div v-else-if="!store.gameStarted" class="center waiting">
-    <p>{{ store.isSolo ? 'Starting solo game…' : 'Waiting for players to join…' }}</p>
-    <p class="sub">Room ID: <code>{{ store.roomId }}</code></p>
-    <p class="sub">Your seat: {{ store.seat }}</p>
-    <p v-if="!store.isSolo" class="hint">Share the room ID with other players.</p>
-  </div>
-
-  <!-- Game in progress -->
   <sheepshead-table v-else-if="store.gameState?.game_name === 'sheepshead'" />
-
-  <!-- Fallback for unknown games -->
   <div v-else class="center">
-    <p>Unknown game: {{ store.gameState?.game_name }}</p>
+    <p>Waiting for game to start…</p>
   </div>
 </template>
 

@@ -1,94 +1,96 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGame } from '@/composables/useGame'
 import { connected } from '@/engine/socket'
 
 const router = useRouter()
-const { store, createRoom, createSoloRoom, joinRoom } = useGame()
+const { createSoloRoom, joinWithCode, joinQueue, createPrivateRoom } = useGame()
 
-const game     = ref('sheepshead')
-const players  = ref(5)
-const joinId   = ref('')
+const guestName = ref(localStorage.getItem('guestName') ?? '')
+const joinCode  = ref('')
+const nameError = ref('')
 
-function handleCreate() {
-  createRoom(game.value, players.value)
-  router.push('/game')
+function saveName() {
+  const n = guestName.value.trim()
+  if (!n) { nameError.value = 'Enter a name to continue.'; return false }
+  localStorage.setItem('guestName', n)
+  nameError.value = ''
+  return true
 }
 
 function handleSolo() {
-  createSoloRoom(game.value, players.value)
+  if (!saveName()) return
+  createSoloRoom('sheepshead', 5)
   router.push('/game')
 }
 
-function handleJoin() {
-  if (!joinId.value.trim()) return
-  joinRoom(joinId.value.trim())
-  router.push('/game')
+function handleCreatePrivate() {
+  if (!saveName()) return
+  createPrivateRoom('sheepshead', null, guestName.value.trim())
+  router.push('/lobby')
 }
+
+function handleJoinCode() {
+  if (!saveName()) return
+  if (!joinCode.value.trim()) return
+  joinWithCode(guestName.value.trim(), joinCode.value.trim().toUpperCase())
+  router.push('/lobby')
+}
+
+function handleFindGame() {
+  if (!saveName()) return
+  joinQueue()
+  router.push('/queue')
+}
+
+onMounted(() => {
+  guestName.value = localStorage.getItem('guestName') ?? ''
+})
 </script>
 
 <template>
   <div class="home">
     <h1>Tricks</h1>
-
     <p v-if="!connected" class="warn">Not connected to server — waiting…</p>
 
-    <!-- Solo mode — prominent single CTA -->
+    <!-- Name prompt -->
+    <section class="name-section">
+      <label>
+        Your name
+        <input v-model="guestName" placeholder="Enter display name" maxlength="20" @input="nameError = ''" />
+      </label>
+      <p v-if="nameError" class="name-error">{{ nameError }}</p>
+    </section>
+
+    <!-- Solo -->
     <section class="solo">
       <div class="solo-text">
         <h2>Play Solo</h2>
         <p>You vs 4 bots — starts immediately.</p>
       </div>
-      <div class="solo-controls">
-        <label>
-          Game
-          <select v-model="game">
-            <option value="sheepshead">Sheepshead</option>
-          </select>
-        </label>
-        <button class="btn-solo" :disabled="!connected" @click="handleSolo">Play Solo →</button>
-      </div>
+      <button class="btn-solo" :disabled="!connected" @click="handleSolo">Play Solo →</button>
     </section>
 
+    <!-- Multiplayer actions -->
     <div class="panels">
-      <!-- Create a multiplayer room -->
       <section>
-        <h2>New Room</h2>
-        <form @submit.prevent="handleCreate">
-          <label>
-            Game
-            <select v-model="game">
-              <option value="sheepshead">Sheepshead</option>
-            </select>
-          </label>
-          <label>
-            Players
-            <input type="number" v-model.number="players" min="5" max="5" />
-          </label>
-          <button type="submit" :disabled="!connected">Create Room</button>
-        </form>
+        <h2>Create Private Room</h2>
+        <p class="hint">Share the room code with friends.</p>
+        <button :disabled="!connected" @click="handleCreatePrivate">Create Room →</button>
       </section>
 
-      <!-- Join an existing room -->
       <section>
-        <h2>Join Game</h2>
-        <form @submit.prevent="handleJoin">
-          <label>
-            Room ID
-            <input v-model="joinId" placeholder="paste room ID" />
-          </label>
-          <button type="submit" :disabled="!connected || !joinId.trim()">Join</button>
-        </form>
+        <h2>Find a Game</h2>
+        <p class="hint">Match with others online.</p>
+        <button :disabled="!connected" @click="handleFindGame">Find Game →</button>
       </section>
-    </div>
 
-    <!-- Already in a room -->
-    <div v-if="store.roomId" class="in-room">
-      <p>You're in room <code>{{ store.roomId }}</code>, seat {{ store.seat }}.</p>
-      <router-link to="/game">
-        <button>Go to Table →</button>
-      </router-link>
+      <section class="join-code-section">
+        <h2>Join with Code</h2>
+        <input v-model="joinCode" placeholder="WOLF-42" maxlength="10" @keydown.enter="handleJoinCode" />
+        <button :disabled="!connected || !joinCode.trim()" @click="handleJoinCode">Join →</button>
+      </section>
     </div>
   </div>
 </template>
@@ -97,48 +99,21 @@ function handleJoin() {
 .home { max-width: 600px; margin: 2rem auto; }
 h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
 .warn { color: #fbbf24; }
-
-.solo {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1.5rem;
-}
+.name-section { margin-bottom: 1.25rem; }
+.name-section label { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; color: #9ca3af; }
+.name-section input { font-size: 1rem; }
+.name-error { color: #f87171; font-size: 0.85rem; margin: 0.25rem 0 0; }
+.solo { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4);
+  border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
 .solo-text h2 { margin: 0 0 0.25rem; font-size: 1.1rem; }
-.solo-text p  { margin: 0; font-size: 0.85rem; color: #9ca3af; }
-.solo-controls { display: flex; align-items: flex-end; gap: 0.75rem; }
-.btn-solo {
-  background: #6366f1;
-  white-space: nowrap;
-}
+.solo-text p { margin: 0; font-size: 0.85rem; color: #9ca3af; }
+.btn-solo { background: #6366f1; white-space: nowrap; }
 .btn-solo:hover:not(:disabled) { background: #4f46e5; }
-
-.panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-  margin-bottom: 2rem;
-}
-
-section {
-  background: rgba(0,0,0,0.25);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-}
-h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
-
-form { display: flex; flex-direction: column; gap: 0.5rem; }
-label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: #9ca3af; }
-
-.in-room {
-  background: rgba(0,0,0,0.25);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-}
-code { font-size: 0.8rem; background: rgba(255,255,255,0.1); padding: 0.1rem 0.3rem; border-radius: 3px; }
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
+.join-code-section { grid-column: 1 / -1; }
+section { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
+h2 { margin: 0; font-size: 1rem; }
+.hint { margin: 0; font-size: 0.8rem; color: #6b7280; }
+input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; padding: 0.4rem 0.6rem; color: #fff; font-size: 0.9rem; }
 </style>
