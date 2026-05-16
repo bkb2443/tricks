@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, watch } from 'vue'
+import { computed, ref, nextTick, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
@@ -36,6 +36,10 @@ watch(countdownEndsAt, (val) => {
   }
   update()
   countdownInterval = setInterval(update, 500)
+})
+
+onUnmounted(() => {
+  if (countdownInterval) clearInterval(countdownInterval)
 })
 
 // Navigate to game when phase changes out of lobby
