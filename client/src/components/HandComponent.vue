@@ -8,11 +8,12 @@ const props = defineProps<{
   cards: Card[]
   selectable?: boolean
   selectedCards?: Card[]
+  sortFn?: (cards: Card[]) => Card[]
 }>()
 
 const emit = defineEmits<{ select: [card: Card] }>()
 
-const sortedCards = computed(() => sortHand(props.cards))
+const sortedCards = computed(() => props.sortFn ? props.sortFn(props.cards) : sortHand(props.cards))
 
 function isSelected(card: Card): boolean {
   return (

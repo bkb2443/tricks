@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
-import { trickWinnerIndex } from '@/engine/sort'
+import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Suit, Trick } from '@/engine/types'
+import { trickWinnerIndex, trickWinnerIndexEuchre } from '@/engine/sort'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -57,10 +57,50 @@ export const useGameStore = defineStore('game', () => {
     return typeof cs === 'string' ? cs : null
   })
 
+  // ── Euchre-specific computed props ────────────────────────────────────────
+
+  /** Euchre: seat of caller (who called trump) */
+  const euchreCallerSeat = computed<number | null>(() => {
+    if (gameState.value?.game_name !== 'euchre') return null
+    const c = gameState.value?.meta?.caller_seat
+    return typeof c === 'number' ? c : null
+  })
+
+  /** Euchre: seat of player who sits out when going alone */
+  const euchreSitsOut = computed<number | null>(() => {
+    if (gameState.value?.game_name !== 'euchre') return null
+    const so = gameState.value?.meta?.sits_out
+    return typeof so === 'number' ? so : null
+  })
+
+  /** Euchre: called trump suit */
+  const euchreCalledSuit = computed<Suit | null>(() => {
+    if (gameState.value?.game_name !== 'euchre') return null
+    const cs = gameState.value?.meta?.called_suit
+    return typeof cs === 'string' ? cs as Suit : null
+  })
+
+  /** Euchre: the face-up card during round 1 ordering */
+  const euchreTurnedUpCard = computed<Card | null>(() => {
+    if (gameState.value?.game_name !== 'euchre') return null
+    const tc = gameState.value?.meta?.turned_up_card
+    return (tc && typeof tc === 'object' && 'suit' in (tc as object)) ? tc as Card : null
+  })
+
+  /** Euchre: current bidding sub-phase */
+  const euchreSubPhase = computed<string | null>(() => {
+    const sp = gameState.value?.meta?.sub_phase
+    return typeof sp === 'string' ? sp : null
+  })
+
   /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress. */
   const currentTrickWinner = computed<number>(() => {
     const trick = gameState.value?.current_trick
     if (!trick || trick.plays.length === 0) return -1
+    if (gameState.value?.game_name === 'euchre') {
+      const cs = euchreCalledSuit.value
+      return trickWinnerIndexEuchre(trick, cs)
+    }
     return trickWinnerIndex(trick)
   })
 
@@ -112,7 +152,14 @@ export const useGameStore = defineStore('game', () => {
         // internally but only sends CardPlayed, not the new current_player.
         const trick = s.current_trick!
         if (trick.plays.length < s.player_count) {
-          s.current_player = (trick.led_by + trick.plays.length) % s.player_count
+          let nextPlayer = (trick.led_by + trick.plays.length) % s.player_count
+          if (s.game_name === 'euchre') {
+            const sitsOut = typeof s.meta?.sits_out === 'number' ? s.meta.sits_out as number : null
+            if (sitsOut !== null && nextPlayer === sitsOut) {
+              nextPlayer = (nextPlayer + 1) % s.player_count
+            }
+          }
+          s.current_player = nextPlayer
         }
         // Remove the card from the local hand if we played it.
         if (update.player === seat.value) {
@@ -224,6 +271,8 @@ export const useGameStore = defineStore('game', () => {
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
     isCallingPhase, callableSuits, calledSuit, isLobby,
+    // euchre derived
+    euchreCallerSeat, euchreSitsOut, euchreCalledSuit, euchreTurnedUpCard, euchreSubPhase,
     // actions
     handleUpdate, reset,
   }
