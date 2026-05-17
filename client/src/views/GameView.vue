@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useGameStore } from '@/stores/game'
 import SheepsheadTable from '@/games/sheepshead/GameTable.vue'
+import EuchreTable from '@/games/euchre/GameTable.vue'
 
 const store = useGameStore()
 
@@ -14,6 +15,7 @@ const notInRoom = computed(() => store.roomId === null)
     <router-link to="/"><button>Back to Home</button></router-link>
   </div>
   <sheepshead-table v-else-if="store.gameState?.game_name === 'sheepshead'" />
+  <euchre-table v-else-if="store.gameState?.game_name === 'euchre'" />
   <div v-else class="center">
     <p>Waiting for game to start…</p>
   </div>

@@ -10,6 +10,7 @@ const { createSoloRoom, joinWithCode, joinQueue, createPrivateRoom } = useGame()
 const guestName = ref(localStorage.getItem('guestName') ?? '')
 const joinCode  = ref('')
 const nameError = ref('')
+const selectedGame = ref<'sheepshead' | 'euchre'>('sheepshead')
 
 function saveName() {
   const n = guestName.value.trim()
@@ -21,13 +22,13 @@ function saveName() {
 
 function handleSolo() {
   if (!saveName()) return
-  createSoloRoom('sheepshead', 5)
+  createSoloRoom(selectedGame.value, selectedGame.value === 'euchre' ? 4 : 5)
   router.push('/game')
 }
 
 function handleCreatePrivate() {
   if (!saveName()) return
-  createPrivateRoom('sheepshead', null, guestName.value.trim())
+  createPrivateRoom(selectedGame.value, null, guestName.value.trim())
   router.push('/lobby')
 }
 
@@ -63,11 +64,34 @@ onMounted(() => {
       <p v-if="nameError" class="name-error">{{ nameError }}</p>
     </section>
 
+    <!-- Game selector -->
+    <section class="game-selector">
+      <h2>Choose Game</h2>
+      <div class="game-options">
+        <button
+          class="game-option"
+          :class="{ selected: selectedGame === 'sheepshead' }"
+          @click="selectedGame = 'sheepshead'"
+        >
+          <span class="game-name">Sheepshead</span>
+          <span class="game-detail">5 players</span>
+        </button>
+        <button
+          class="game-option"
+          :class="{ selected: selectedGame === 'euchre' }"
+          @click="selectedGame = 'euchre'"
+        >
+          <span class="game-name">Euchre</span>
+          <span class="game-detail">4 players</span>
+        </button>
+      </div>
+    </section>
+
     <!-- Solo -->
     <section class="solo">
       <div class="solo-text">
         <h2>Play Solo</h2>
-        <p>You vs 4 bots — starts immediately.</p>
+        <p>You vs {{ selectedGame === 'euchre' ? 3 : 4 }} bots — starts immediately.</p>
       </div>
       <button class="btn-solo" :disabled="!connected" @click="handleSolo">Play Solo →</button>
     </section>
@@ -116,4 +140,28 @@ section { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 1rem 1.25re
 h2 { margin: 0; font-size: 1rem; }
 .hint { margin: 0; font-size: 0.8rem; color: #6b7280; }
 input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; padding: 0.4rem 0.6rem; color: #fff; font-size: 0.9rem; }
+
+/* Game selector */
+.game-selector { margin-bottom: 0.5rem; }
+.game-selector h2 { margin: 0 0 0.5rem; font-size: 1rem; }
+.game-options { display: flex; gap: 0.75rem; }
+.game-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  background: rgba(0,0,0,0.25);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  color: #d1d5db;
+}
+.game-option:hover { border-color: #6366f1; background: rgba(99,102,241,0.1); }
+.game-option.selected { border-color: #6366f1; background: rgba(99,102,241,0.2); color: #fff; }
+.game-name { font-size: 1rem; font-weight: 600; }
+.game-detail { font-size: 0.75rem; color: #9ca3af; }
+.game-option.selected .game-detail { color: #c7d2fe; }
 </style>
