@@ -4,21 +4,28 @@ import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
-import BiddingPanel from './BiddingPanel.vue'
+import EuchreBiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
+import { sortHandEuchre } from '@/games/euchre/sort'
+import { useEuchreState } from '@/games/euchre/state'
 
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
 const { playCard } = useGame()
+const { callerSeat, sitsOut, calledSuit } = useEuchreState()
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const state = computed(() => store.gameState!)
 const seat  = computed(() => store.seat ?? 0)
 
+const VICTORY_GOAL = 10
+
+const SUIT_SYMBOLS: Record<string, string> = { clubs: '♣', spades: '♠', hearts: '♥', diamonds: '♦' }
+
 const canPlay = computed(
-  () => store.isMyTurn && state.value.phase === 'playing',
+  () => store.isMyTurn && state.value.phase === 'playing' && seat.value !== sitsOut.value,
 )
 
 // Build the player list in seat order, starting from the viewer's seat
@@ -31,17 +38,22 @@ function handlePlay(card: Card) {
   if (canPlay.value) playCard(card)
 }
 
-const VICTORY_GOAL = 24
-
 // Score display: positive = win (green), negative = loss (red)
 function scoreClass(s: number) {
   return s > 0 ? 'win' : s < 0 ? 'loss' : ''
 }
 
-const partnerSeat = computed<number | null>(() => {
-  const p = state.value.meta?.partner
-  return typeof p === 'number' ? p : null
-})
+// Team check: seats 0&2 vs 1&3
+function isTeammate(p: number): boolean {
+  return p % 2 === seat.value % 2
+}
+
+function teamLabel(p: number): string {
+  return isTeammate(p) ? '(Partner)' : '(Opponent)'
+}
+
+const completedTricks = computed(() => state.value.completed_tricks.length)
+const currentTrickCount = computed(() => state.value.current_trick ? 1 : 0)
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th']
 function trickOrdinal(n: number) {
@@ -69,28 +81,14 @@ onUnmounted(() => {
   if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null }
 })
 
-const partnerToast = computed(() => {
-  const s = store.partnerRevealedSeat
-  if (s === null) return null
-  return `${playerName(s)} is the partner!`
-})
-
-const calledSuit = computed<string | null>(() => {
-  const cs = store.gameState?.meta?.called_suit
-  return typeof cs === 'string' ? cs : null
-})
+const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards, calledSuit.value))
 </script>
 
 <template>
-  <div class="sheepshead-table">
+  <div class="euchre-table">
     <!-- ── Phase change toast ──────────────────────────────────── -->
     <Transition name="toast">
       <div v-if="phaseToast" class="phase-toast">{{ phaseToast }}</div>
-    </Transition>
-
-    <!-- ── Partner reveal toast ─────────────────────────────────── -->
-    <Transition name="toast">
-      <div v-if="partnerToast" class="phase-toast partner-toast">{{ partnerToast }}</div>
     </Transition>
 
     <!-- ── Header: phase indicator + dealer badge ──────────────── -->
@@ -98,7 +96,7 @@ const calledSuit = computed<string | null>(() => {
       <span class="phase-badge" :class="state.phase">{{ phaseLabel(state.game_name, state.phase) }}</span>
       <span class="dealer-badge">Dealer: {{ playerName(state.dealer) }}</span>
       <span class="trick-counter">
-        Trick {{ state.completed_tricks.length + (state.current_trick ? 1 : 0) }} / 6
+        Trick {{ completedTricks + currentTrickCount }} / 5
       </span>
     </header>
 
@@ -113,7 +111,11 @@ const calledSuit = computed<string | null>(() => {
         <span class="seat-label">
           {{ playerName(p) }}
           <span v-if="p === state.dealer" class="badge">D</span>
-          <span v-if="p === store.picker" class="role-badge picker">Picker</span>
+          <span v-if="p === callerSeat" class="role-badge caller">Caller</span>
+          <span v-if="p === sitsOut" class="role-badge sits-out">Sits Out</span>
+        </span>
+        <span class="team-label" :class="{ partner: isTeammate(p), opponent: !isTeammate(p) }">
+          {{ teamLabel(p) }}
         </span>
         <span class="card-count">{{ state.hands[p].length }} cards</span>
       </div>
@@ -125,30 +127,41 @@ const calledSuit = computed<string | null>(() => {
       :completed-trick="store.completedTrick"
       :my-seat="seat"
       :names="state.names ?? []"
-      :picker-seat="store.picker"
-      :partner-seat="partnerSeat"
+      :picker-seat="callerSeat"
+      :partner-seat="null"
       :current-winner-seat="store.currentTrickWinner"
     />
 
     <!-- ── Bidding panel (only during Bidding phase) ──────────── -->
-    <bidding-panel v-if="state.phase === 'bidding'" />
+    <euchre-bidding-panel v-if="state.phase === 'bidding'" />
 
     <!-- ── My hand ────────────────────────────────────────────── -->
-    <section v-if="state.phase !== 'scoring'" class="my-hand" :class="{ 'your-turn-glow': canPlay }">
+    <section
+      v-if="state.phase !== 'scoring' && seat !== sitsOut"
+      class="my-hand"
+      :class="{ 'your-turn-glow': canPlay }"
+    >
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
-        <span v-if="store.isPicker" class="badge picker">Picker</span>
-        <span v-if="store.isPicker && calledSuit" class="badge called-suit">
-          Called: A{{ calledSuit === 'clubs' ? '♣' : calledSuit === 'spades' ? '♠' : '♥' }}
-        </span>
+        <span v-if="seat === callerSeat" class="badge caller-badge">Caller</span>
+        <span v-if="seat === callerSeat && state.meta?.going_alone" class="badge alone-badge">Alone</span>
         <span v-if="seat === state.dealer" class="badge">Dealer</span>
+        <span v-if="calledSuit" class="badge trump-badge">
+          Trump: {{ SUIT_SYMBOLS[calledSuit] ?? calledSuit }}
+        </span>
         <span v-if="canPlay" class="your-turn">↑ Your turn</span>
       </div>
       <hand-component
         :cards="store.myHand"
         :selectable="canPlay"
+        :sort-fn="euchreHandSortFn"
         @select="handlePlay"
       />
+    </section>
+
+    <!-- ── "Sits out" notice ───────────────────────────────────── -->
+    <section v-if="seat === sitsOut" class="sits-out-notice">
+      <p>You are sitting out this hand (partner is going alone).</p>
     </section>
 
     <!-- ── Session scoreboard (visible once scores accumulate) ── -->
@@ -220,7 +233,7 @@ const calledSuit = computed<string | null>(() => {
 </template>
 
 <style scoped>
-.sheepshead-table {
+.euchre-table {
   max-width: 700px;
   margin: 0 auto;
   display: flex;
@@ -264,11 +277,14 @@ const calledSuit = computed<string | null>(() => {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  min-width: 60px;
+  min-width: 70px;
 }
 .seat.active { border-color: #22c55e; }
 .seat-label { display: flex; align-items: center; gap: 4px; font-weight: 600; }
 .card-count { color: #9ca3af; }
+.team-label { font-size: 0.7rem; }
+.team-label.partner  { color: #34d399; }
+.team-label.opponent { color: #f87171; }
 
 .badge {
   font-size: 0.65rem;
@@ -283,7 +299,8 @@ const calledSuit = computed<string | null>(() => {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
-.role-badge.picker { background: #7c3aed; color: #fff; }
+.role-badge.caller   { background: #b45309; color: #fff; }
+.role-badge.sits-out { background: #4b5563; color: #d1d5db; }
 
 /* My hand */
 .my-hand {
@@ -300,6 +317,21 @@ const calledSuit = computed<string | null>(() => {
   gap: 0.4rem;
 }
 .your-turn { color: #22c55e; font-weight: 600; }
+
+.caller-badge { background: #b45309; color: #fff; font-size: 0.65rem; padding: 0 5px; border-radius: 3px; }
+.alone-badge  { background: #9333ea; color: #fff; font-size: 0.65rem; padding: 0 5px; border-radius: 3px; }
+.trump-badge  { background: #0284c7; color: #fff; font-size: 0.65rem; padding: 0 5px; border-radius: 3px; }
+
+/* Sits-out notice */
+.sits-out-notice {
+  background: rgba(0,0,0,0.2);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  color: #9ca3af;
+  font-style: italic;
+}
+.sits-out-notice p { margin: 0; }
 
 /* Session scoreboard */
 .session-scores {
@@ -390,6 +422,4 @@ const calledSuit = computed<string | null>(() => {
   z-index: 100;
   letter-spacing: 0.04em;
 }
-.partner-toast { background: rgba(13, 148, 136, 0.9); }
-.called-suit { background: #0284c7; color: #fff; font-size: 0.65rem; padding: 0 5px; border-radius: 3px; margin-left: 0.25rem; }
 </style>

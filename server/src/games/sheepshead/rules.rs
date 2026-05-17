@@ -175,7 +175,7 @@ impl Game for Sheepshead {
                 state.meta["partner"] = serde_json::json!(seat);
             }
         }
-        apply_play_generic(self, state, seat, card)
+        apply_play_generic(self, state, seat, card, None)
     }
 
     fn trump_rank(&self, card: Card, _state: &GameState) -> Option<u8> {

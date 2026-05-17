@@ -17,8 +17,14 @@ const isBuryPhase    = computed(() => store.picker !== null && store.phase === '
 const isMyPickTurn = computed(() => isPickingPhase.value && store.isMyTurn)
 const isMyBuryTurn = computed(() => isBuryPhase.value && store.isPicker)
 
-const isCallingPhase = computed(() => store.isCallingPhase)
-const isMyCallTurn   = computed(() => isCallingPhase.value && store.isPicker)
+const isCallingPhase = computed(() =>
+  store.gameState?.meta?.sub_phase === 'calling' && store.phase === 'bidding'
+)
+const callableSuits = computed<string[]>(() => {
+  const cs = store.gameState?.meta?.callable_suits
+  return Array.isArray(cs) ? (cs as string[]) : []
+})
+const isMyCallTurn = computed(() => isCallingPhase.value && store.isPicker)
 
 const SUIT_LABELS: Record<string, string> = {
   clubs:  '♣ Clubs',
@@ -95,7 +101,7 @@ function submitBury() {
         <p>Choose your partner card or go alone</p>
         <div class="call-suits">
           <button
-            v-for="suit in store.callableSuits"
+            v-for="suit in callableSuits"
             :key="suit"
             class="btn-call"
             @click="callAce(suit)"

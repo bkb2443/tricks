@@ -1,4 +1,5 @@
 import type { Card, Suit, Trick } from './types'
+export type { Trick }
 
 // ---------------------------------------------------------------------------
 // Sheepshead trump logic (mirrors server-side rules)
@@ -41,7 +42,7 @@ function effectiveSuit(card: Card): string {
 // ---------------------------------------------------------------------------
 
 /** Fail suit display order (higher = displayed first, after trump). */
-const SUIT_ORDER: Partial<Record<Suit, number>> = { clubs: 3, spades: 2, hearts: 1, diamonds: 0 }
+export const SUIT_ORDER: Partial<Record<Suit, number>> = { clubs: 3, spades: 2, hearts: 1, diamonds: 0 }
 
 /**
  * Sort a hand for display: trump high→low, then fail suits (clubs, spades, hearts)
@@ -101,3 +102,4 @@ export function trickWinnerIndex(trick: Trick): number {
 
   return bestIdx
 }
+

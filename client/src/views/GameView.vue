@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { useGameStore } from '@/stores/game'
-import SheepsheadTable from '@/games/sheepshead/GameTable.vue'
+import type { Component } from 'vue'
 
 const store = useGameStore()
 
+const GAME_TABLES: Record<string, Component> = {
+  sheepshead: defineAsyncComponent(() => import('@/games/sheepshead/GameTable.vue')),
+  euchre:     defineAsyncComponent(() => import('@/games/euchre/GameTable.vue')),
+}
+
 const notInRoom = computed(() => store.roomId === null)
+const gameTable = computed(() => store.gameState ? GAME_TABLES[store.gameState.game_name] : null)
 </script>
 
 <template>
@@ -13,7 +19,7 @@ const notInRoom = computed(() => store.roomId === null)
     <p>You haven't joined a room yet.</p>
     <router-link to="/"><button>Back to Home</button></router-link>
   </div>
-  <sheepshead-table v-else-if="store.gameState?.game_name === 'sheepshead'" />
+  <component :is="gameTable" v-else-if="gameTable" />
   <div v-else class="center">
     <p>Waiting for game to start…</p>
   </div>
@@ -29,8 +35,4 @@ const notInRoom = computed(() => store.roomId === null)
   padding: 4rem 1rem;
   text-align: center;
 }
-.waiting p { font-size: 1.2rem; }
-.sub  { color: #9ca3af; font-size: 0.9rem; }
-.hint { font-size: 0.85rem; color: #6b7280; font-style: italic; }
-code { background: rgba(255,255,255,0.1); padding: 0.1rem 0.35rem; border-radius: 3px; }
 </style>
