@@ -1,4 +1,5 @@
 import type { Card, Suit, Trick } from './types'
+export type { Trick }
 
 // ---------------------------------------------------------------------------
 // Sheepshead trump logic (mirrors server-side rules)
@@ -41,7 +42,7 @@ function effectiveSuit(card: Card): string {
 // ---------------------------------------------------------------------------
 
 /** Fail suit display order (higher = displayed first, after trump). */
-const SUIT_ORDER: Partial<Record<Suit, number>> = { clubs: 3, spades: 2, hearts: 1, diamonds: 0 }
+export const SUIT_ORDER: Partial<Record<Suit, number>> = { clubs: 3, spades: 2, hearts: 1, diamonds: 0 }
 
 /**
  * Sort a hand for display: trump high→low, then fail suits (clubs, spades, hearts)
@@ -102,72 +103,3 @@ export function trickWinnerIndex(trick: Trick): number {
   return bestIdx
 }
 
-// ---------------------------------------------------------------------------
-// Euchre trump logic
-// ---------------------------------------------------------------------------
-
-function sameColorSuit(suit: Suit): Suit {
-  const map: Record<Suit, Suit> = { clubs: 'spades', spades: 'clubs', hearts: 'diamonds', diamonds: 'hearts' }
-  return map[suit]
-}
-
-function euchreTrumpRank(card: Card, calledSuit: Suit): number | null {
-  if (card.rank === 'jack' && card.suit === calledSuit) return 8          // Right Bower
-  if (card.rank === 'jack' && card.suit === sameColorSuit(calledSuit)) return 7  // Left Bower
-  if (card.suit === calledSuit) {
-    const r: Partial<Record<Card['rank'], number>> = { ace: 6, king: 5, queen: 4, ten: 3, nine: 2 }
-    return r[card.rank] ?? null
-  }
-  return null
-}
-
-function euchreEffectiveSuit(card: Card, calledSuit: Suit): string {
-  return euchreTrumpRank(card, calledSuit) !== null ? 'trump' : card.suit
-}
-
-function euchrePlainRank(card: Card): number {
-  const r: Partial<Record<Card['rank'], number>> = { ace: 6, king: 5, queen: 4, jack: 3, ten: 2, nine: 1 }
-  return r[card.rank] ?? 0
-}
-
-/**
- * Sort a Euchre hand for display: trump high→low, then fail suits each sorted high→low.
- * If no trump has been called yet, preserves original order.
- * Does not mutate the input array.
- */
-export function sortHandEuchre(cards: Card[], calledSuit: Suit | null): Card[] {
-  if (!calledSuit) return [...cards]  // no trump called yet — preserve order
-  return [...cards].sort((a, b) => {
-    const ta = euchreTrumpRank(a, calledSuit)
-    const tb = euchreTrumpRank(b, calledSuit)
-    if (ta !== null && tb === null) return -1
-    if (ta === null && tb !== null) return 1
-    if (ta !== null && tb !== null) return tb - ta
-    const suitDiff = (SUIT_ORDER[b.suit] ?? 0) - (SUIT_ORDER[a.suit] ?? 0)
-    return suitDiff !== 0 ? suitDiff : euchrePlainRank(b) - euchrePlainRank(a)
-  })
-}
-
-/**
- * Returns the index within `trick.plays` of the currently winning play for Euchre.
- * Returns -1 if the trick has no plays or no trump has been called.
- * Works on partial (in-progress) tricks.
- */
-export function trickWinnerIndexEuchre(trick: Trick, calledSuit: Suit | null): number {
-  if (trick.plays.length === 0 || !calledSuit) return -1
-  let bestIdx = 0
-  let bestTrump = euchreTrumpRank(trick.plays[0][1], calledSuit)
-  const ledSuit = euchreEffectiveSuit(trick.plays[0][1], calledSuit)
-  for (let i = 1; i < trick.plays.length; i++) {
-    const card = trick.plays[i][1]
-    const t = euchreTrumpRank(card, calledSuit)
-    let beats = false
-    if (bestTrump === null && t !== null) beats = true
-    else if (bestTrump !== null && t !== null) beats = t > bestTrump
-    else if (bestTrump === null && t === null) {
-      beats = euchreEffectiveSuit(card, calledSuit) === ledSuit && euchrePlainRank(card) > euchrePlainRank(trick.plays[bestIdx][1])
-    }
-    if (beats) { bestIdx = i; bestTrump = t }
-  }
-  return bestIdx
-}

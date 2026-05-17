@@ -7,12 +7,14 @@ import HandComponent from '@/components/HandComponent.vue'
 import EuchreBiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
-import { sortHandEuchre } from '@/engine/sort'
+import { sortHandEuchre } from '@/games/euchre/sort'
+import { useEuchreState } from '@/games/euchre/state'
 
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
 const { playCard } = useGame()
+const { callerSeat, sitsOut, calledSuit } = useEuchreState()
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const state = computed(() => store.gameState!)
@@ -23,7 +25,7 @@ const VICTORY_GOAL = 10
 const SUIT_SYMBOLS: Record<string, string> = { clubs: '♣', spades: '♠', hearts: '♥', diamonds: '♦' }
 
 const canPlay = computed(
-  () => store.isMyTurn && state.value.phase === 'playing' && seat.value !== store.euchreSitsOut,
+  () => store.isMyTurn && state.value.phase === 'playing' && seat.value !== sitsOut.value,
 )
 
 // Build the player list in seat order, starting from the viewer's seat
@@ -79,9 +81,7 @@ onUnmounted(() => {
   if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null }
 })
 
-const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards, store.euchreCalledSuit))
-
-const calledSuit = computed(() => store.euchreCalledSuit)
+const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards, calledSuit.value))
 </script>
 
 <template>
@@ -111,8 +111,8 @@ const calledSuit = computed(() => store.euchreCalledSuit)
         <span class="seat-label">
           {{ playerName(p) }}
           <span v-if="p === state.dealer" class="badge">D</span>
-          <span v-if="p === store.euchreCallerSeat" class="role-badge caller">Caller</span>
-          <span v-if="p === store.euchreSitsOut" class="role-badge sits-out">Sits Out</span>
+          <span v-if="p === callerSeat" class="role-badge caller">Caller</span>
+          <span v-if="p === sitsOut" class="role-badge sits-out">Sits Out</span>
         </span>
         <span class="team-label" :class="{ partner: isTeammate(p), opponent: !isTeammate(p) }">
           {{ teamLabel(p) }}
@@ -127,8 +127,9 @@ const calledSuit = computed(() => store.euchreCalledSuit)
       :completed-trick="store.completedTrick"
       :my-seat="seat"
       :names="state.names ?? []"
-      :picker-seat="store.euchreCallerSeat"
+      :picker-seat="callerSeat"
       :partner-seat="null"
+      :current-winner-seat="store.currentTrickWinner"
     />
 
     <!-- ── Bidding panel (only during Bidding phase) ──────────── -->
@@ -136,14 +137,14 @@ const calledSuit = computed(() => store.euchreCalledSuit)
 
     <!-- ── My hand ────────────────────────────────────────────── -->
     <section
-      v-if="state.phase !== 'scoring' && seat !== store.euchreSitsOut"
+      v-if="state.phase !== 'scoring' && seat !== sitsOut"
       class="my-hand"
       :class="{ 'your-turn-glow': canPlay }"
     >
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
-        <span v-if="seat === store.euchreCallerSeat" class="badge caller-badge">Caller</span>
-        <span v-if="seat === store.euchreCallerSeat && state.meta?.going_alone" class="badge alone-badge">Alone</span>
+        <span v-if="seat === callerSeat" class="badge caller-badge">Caller</span>
+        <span v-if="seat === callerSeat && state.meta?.going_alone" class="badge alone-badge">Alone</span>
         <span v-if="seat === state.dealer" class="badge">Dealer</span>
         <span v-if="calledSuit" class="badge trump-badge">
           Trump: {{ SUIT_SYMBOLS[calledSuit] ?? calledSuit }}
@@ -159,7 +160,7 @@ const calledSuit = computed(() => store.euchreCalledSuit)
     </section>
 
     <!-- ── "Sits out" notice ───────────────────────────────────── -->
-    <section v-if="seat === store.euchreSitsOut" class="sits-out-notice">
+    <section v-if="seat === sitsOut" class="sits-out-notice">
       <p>You are sitting out this hand (partner is going alone).</p>
     </section>
 

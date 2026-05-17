@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Suit, Trick } from '@/engine/types'
-import { trickWinnerIndex, trickWinnerIndexEuchre } from '@/engine/sort'
+import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -14,6 +13,7 @@ export const useGameStore = defineStore('game', () => {
   const sessionScores = ref<number[]>([])
   const sessionWinner = ref<number | null>(null)
   const completedTrick = ref<Trick | null>(null)
+  const currentTrickWinnerSeat = ref<number>(-1)
   const partnerRevealedSeat = ref<number | null>(null)
   const seats          = ref<SeatInfo[]>([])
   const lobbyChat      = ref<Array<{ from: string; text: string; timestamp: number }>>([])
@@ -57,52 +57,9 @@ export const useGameStore = defineStore('game', () => {
     return typeof cs === 'string' ? cs : null
   })
 
-  // ── Euchre-specific computed props ────────────────────────────────────────
-
-  /** Euchre: seat of caller (who called trump) */
-  const euchreCallerSeat = computed<number | null>(() => {
-    if (gameState.value?.game_name !== 'euchre') return null
-    const c = gameState.value?.meta?.caller_seat
-    return typeof c === 'number' ? c : null
-  })
-
-  /** Euchre: seat of player who sits out when going alone */
-  const euchreSitsOut = computed<number | null>(() => {
-    if (gameState.value?.game_name !== 'euchre') return null
-    const so = gameState.value?.meta?.sits_out
-    return typeof so === 'number' ? so : null
-  })
-
-  /** Euchre: called trump suit */
-  const euchreCalledSuit = computed<Suit | null>(() => {
-    if (gameState.value?.game_name !== 'euchre') return null
-    const cs = gameState.value?.meta?.called_suit
-    return typeof cs === 'string' ? cs as Suit : null
-  })
-
-  /** Euchre: the face-up card during round 1 ordering */
-  const euchreTurnedUpCard = computed<Card | null>(() => {
-    if (gameState.value?.game_name !== 'euchre') return null
-    const tc = gameState.value?.meta?.turned_up_card
-    return (tc && typeof tc === 'object' && 'suit' in (tc as object)) ? tc as Card : null
-  })
-
-  /** Euchre: current bidding sub-phase */
-  const euchreSubPhase = computed<string | null>(() => {
-    const sp = gameState.value?.meta?.sub_phase
-    return typeof sp === 'string' ? sp : null
-  })
-
-  /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress. */
-  const currentTrickWinner = computed<number>(() => {
-    const trick = gameState.value?.current_trick
-    if (!trick || trick.plays.length === 0) return -1
-    if (gameState.value?.game_name === 'euchre') {
-      const cs = euchreCalledSuit.value
-      return trickWinnerIndexEuchre(trick, cs)
-    }
-    return trickWinnerIndex(trick)
-  })
+  /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress.
+   *  Updated from server-sent `current_trick_winner` on each CardPlayed event. */
+  const currentTrickWinner = computed<number>(() => currentTrickWinnerSeat.value)
 
   /** Returns "You" for the local player's seat, the server-assigned name otherwise,
    *  falling back to "P{seat}" if names haven't loaded yet. */
@@ -127,6 +84,7 @@ export const useGameStore = defineStore('game', () => {
         gameState.value = update.state
         // The snapshot only populates our own hand slot; sync myHand from it.
         myHand.value = update.state.hands[seat.value!] ?? []
+        currentTrickWinnerSeat.value = -1
         break
 
       case 'hand_updated':
@@ -168,6 +126,8 @@ export const useGameStore = defineStore('game', () => {
           )
           if (idx !== -1) myHand.value.splice(idx, 1)
         }
+        // Track the currently winning seat from the server-authoritative value.
+        currentTrickWinnerSeat.value = update.current_trick_winner ?? -1
         break
       }
 
@@ -178,6 +138,7 @@ export const useGameStore = defineStore('game', () => {
         gameState.value.completed_tricks.push(t)
         gameState.value.current_trick  = null
         gameState.value.current_player = update.winner
+        currentTrickWinnerSeat.value = -1
         // Hold the completed trick visible for 1.5s
         completedTrick.value = { ...t }
         if (pauseTimer !== null) clearTimeout(pauseTimer)
@@ -256,6 +217,7 @@ export const useGameStore = defineStore('game', () => {
     sessionScores.value = []
     sessionWinner.value = null
     completedTrick.value = null
+    currentTrickWinnerSeat.value = -1
     partnerRevealedSeat.value = null
     seats.value       = []
     lobbyChat.value   = []
@@ -271,8 +233,6 @@ export const useGameStore = defineStore('game', () => {
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
     isCallingPhase, callableSuits, calledSuit, isLobby,
-    // euchre derived
-    euchreCallerSeat, euchreSitsOut, euchreCalledSuit, euchreTurnedUpCard, euchreSubPhase,
     // actions
     handleUpdate, reset,
   }

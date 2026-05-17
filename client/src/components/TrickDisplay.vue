@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Trick } from '@/engine/types'
-import { trickWinnerIndex } from '@/engine/sort'
 import CardComponent from './CardComponent.vue'
 
 const props = defineProps<{
@@ -11,6 +10,7 @@ const props = defineProps<{
   names: string[]
   pickerSeat: number | null
   partnerSeat: number | null
+  currentWinnerSeat?: number
 }>()
 
 const ORDER_BADGES = ['①', '②', '③', '④', '⑤']
@@ -24,9 +24,11 @@ function playerLabel(seat: number): string {
 const activeTrick = computed(() => props.trick ?? props.completedTrick)
 const isCompleted = computed(() => props.trick === null && props.completedTrick !== null)
 
-const winnerIdx = computed(() =>
-  props.trick ? trickWinnerIndex(props.trick) : -1,
-)
+const winnerIdx = computed(() => {
+  const s = props.currentWinnerSeat ?? -1
+  if (!props.trick || s < 0) return -1
+  return props.trick.plays.findIndex(([seat]) => seat === s)
+})
 </script>
 
 <template>

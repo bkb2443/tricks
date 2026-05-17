@@ -54,7 +54,7 @@ export type ClientMessage =
 export type StateUpdate =
   | { type: 'joined_room';     room_id: string; seat: number; room_code: string }
   | { type: 'snapshot';        state: GameState }
-  | { type: 'card_played';     player: number; card: Card }
+  | { type: 'card_played';     player: number; card: Card; current_trick_winner?: number }
   | { type: 'trick_complete';  winner: number; points: number }
   | { type: 'hand_complete';   hand_scores: number[]; session_scores: number[] }
   | { type: 'session_over';    winner: number; final_scores: number[] }

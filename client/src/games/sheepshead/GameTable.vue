@@ -124,6 +124,7 @@ const calledSuit = computed(() => store.calledSuit)
       :names="state.names ?? []"
       :picker-seat="store.picker"
       :partner-seat="partnerSeat"
+      :current-winner-seat="store.currentTrickWinner"
     />
 
     <!-- ── Bidding panel (only during Bidding phase) ──────────── -->

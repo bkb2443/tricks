@@ -153,7 +153,9 @@ pub enum StateUpdate {
     /// Full state snapshot sent once dealing is complete. Only `hands[seat]` is
     /// populated; other hands are empty. `extra_piles` is also cleared (blind is hidden).
     Snapshot { state: GameState },
-    CardPlayed { player: usize, card: Card },
+    /// `current_trick_winner` is the seat currently winning the in-progress trick,
+    /// or `None` if the trick just completed (server will emit TrickComplete separately).
+    CardPlayed { player: usize, card: Card, current_trick_winner: Option<usize> },
     TrickComplete { winner: usize, points: u8 },
     /// Per-hand result plus running session totals. Sent after each hand.
     HandComplete { hand_scores: Vec<i32>, session_scores: Vec<i32> },

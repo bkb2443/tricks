@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sortHand, trickWinnerIndex } from './sort'
-import type { Card, Trick } from './types'
+import { sortHand } from './sort'
+import type { Card } from './types'
 
 function card(suit: Card['suit'], rank: Card['rank']): Card {
   return { suit, rank }
@@ -57,59 +57,5 @@ describe('sortHand', () => {
     const original = [...hand]
     sortHand(hand)
     expect(hand).toEqual(original)
-  })
-})
-
-describe('trickWinnerIndex', () => {
-  it('returns 0 for a single-card trick', () => {
-    const trick: Trick = {
-      led_by: 0,
-      plays: [[0, card('clubs', 'ace')]],
-      winner: null,
-    }
-    expect(trickWinnerIndex(trick)).toBe(0)
-  })
-
-  it('trump beats fail regardless of rank', () => {
-    const trick: Trick = {
-      led_by: 0,
-      plays: [
-        [0, card('clubs', 'ace')],      // led: fail ace
-        [1, card('diamonds', 'seven')], // trump (rank 1)
-      ],
-      winner: null,
-    }
-    expect(trickWinnerIndex(trick)).toBe(1) // trump wins
-  })
-
-  it('higher trump beats lower trump', () => {
-    const trick: Trick = {
-      led_by: 0,
-      plays: [
-        [0, card('diamonds', 'seven')], // trump rank 1
-        [1, card('spades', 'queen')],   // trump rank 13
-        [2, card('clubs', 'jack')],     // trump rank 10
-      ],
-      winner: null,
-    }
-    expect(trickWinnerIndex(trick)).toBe(1) // Q♠ wins
-  })
-
-  it('within fail suit, led suit beats off suit, higher rank wins', () => {
-    const trick: Trick = {
-      led_by: 0,
-      plays: [
-        [0, card('clubs', 'seven')], // led clubs
-        [1, card('clubs', 'ace')],   // clubs ace — wins
-        [2, card('hearts', 'ace')],  // off suit — doesn't count
-      ],
-      winner: null,
-    }
-    expect(trickWinnerIndex(trick)).toBe(1) // A♣ wins
-  })
-
-  it('returns -1 for empty trick', () => {
-    const trick: Trick = { led_by: 0, plays: [], winner: null }
-    expect(trickWinnerIndex(trick)).toBe(-1)
   })
 })

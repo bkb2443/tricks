@@ -452,7 +452,7 @@ impl Room {
     }
 
     pub fn play_card(&self, seat: usize, card: Card) -> Result<(), String> {
-        let (result, newly_revealed_partner) = {
+        let (result, newly_revealed_partner, current_trick_winner) = {
             let mut guard = self.state.lock().unwrap();
             let state = guard.as_mut().ok_or_else(|| "game not started".to_string())?;
             let partner_was_null = state.meta["partner"].is_null();
@@ -462,10 +462,17 @@ impl Room {
             } else {
                 None
             };
-            (result, newly_revealed)
+            // After apply_play, if a trick is still in progress compute the current winner.
+            // When the trick just completed, current_trick is None and we send None here
+            // (TrickComplete carries the winner separately).
+            let winner = state.current_trick.as_ref().map(|t| {
+                let idx = self.game.trick_winner(t, state);
+                t.plays[idx].0
+            });
+            (result, newly_revealed, winner)
         };
 
-        self.broadcast(StateUpdate::CardPlayed { player: seat, card });
+        self.broadcast(StateUpdate::CardPlayed { player: seat, card, current_trick_winner });
 
         if let Some(partner_seat) = newly_revealed_partner {
             self.broadcast(StateUpdate::PartnerRevealed { seat: partner_seat });
