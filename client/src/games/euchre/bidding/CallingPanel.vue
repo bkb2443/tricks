@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '@/stores/game'
-import { useGame } from '@/composables/useGame'
-import { useEuchreState } from '@/games/euchre/state'
+import { useEuchreBidding } from '@/games/euchre/useEuchreBidding'
 
 const store = useGameStore()
 const { playerName } = store
-const { callSuit, euchrePass } = useGame()
-const { turnedUpCard } = useEuchreState()
-
+const { callSuit, euchrePass } = useEuchreBidding()
 const state = computed(() => store.gameState!)
 const seat  = computed(() => store.seat ?? 0)
 
@@ -21,10 +18,10 @@ const SUIT_LABELS: Record<string, string> = {
 
 const goAloneCalling = ref(false)
 
-// Suits available for round 2 — all suits except the turned-up card's suit
+// Callable suits are sent by the server when transitioning to the calling sub-phase
 const callableSuits = computed<string[]>(() => {
-  const exclude = turnedUpCard.value?.suit
-  return ['clubs', 'spades', 'hearts', 'diamonds'].filter(s => s !== exclude)
+  const cs = state.value.meta?.callable_suits
+  return Array.isArray(cs) ? (cs as string[]) : []
 })
 
 // "Stick the dealer" rule: dealer cannot pass in round 2 once 3 others have passed

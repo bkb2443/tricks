@@ -19,30 +19,11 @@ pub fn same_color_suit(suit: Suit) -> Suit {
     }
 }
 
-fn parse_suit(s: &str) -> Option<Suit> {
-    match s {
-        "clubs"    => Some(Suit::Clubs),
-        "spades"   => Some(Suit::Spades),
-        "hearts"   => Some(Suit::Hearts),
-        "diamonds" => Some(Suit::Diamonds),
-        _ => None,
-    }
-}
-
-fn suit_str(suit: Suit) -> &'static str {
-    match suit {
-        Suit::Clubs    => "clubs",
-        Suit::Spades   => "spades",
-        Suit::Hearts   => "hearts",
-        Suit::Diamonds => "diamonds",
-    }
-}
-
 /// Trump strength for a given trump suit.
 /// Right bower (Jack of trump suit): 8
 /// Left bower (Jack of same-color suit): 7
 /// A: 6, K: 5, Q: 4, 10: 3, 9: 2
-fn trump_strength_for_suit(card: Card, trump: Suit) -> Option<u8> {
+pub(super) fn trump_strength_for_suit(card: Card, trump: Suit) -> Option<u8> {
     // Right bower
     if card.rank == Rank::Jack && card.suit == trump {
         return Some(8);
@@ -66,7 +47,7 @@ fn trump_strength_for_suit(card: Card, trump: Suit) -> Option<u8> {
 }
 
 /// Plain suit rank: A=6, K=5, Q=4, J=3, 10=2, 9=1
-fn plain_strength(card: Card) -> u8 {
+pub(super) fn plain_strength(card: Card) -> u8 {
     match card.rank {
         Rank::Ace   => 6,
         Rank::King  => 5,
@@ -80,12 +61,11 @@ fn plain_strength(card: Card) -> u8 {
 
 /// Returns the called trump suit from state meta, if present.
 fn called_suit(state: &GameState) -> Option<Suit> {
-    state.meta["called_suit"].as_str().and_then(parse_suit)
+    state.meta["called_suit"].as_str().and_then(Suit::from_str)
 }
 
 /// Get the first active player left of the dealer, skipping sits_out.
-fn first_active_after_dealer(dealer: usize, sits_out: Option<usize>) -> usize {
-    let player_count = 4;
+fn first_active_after_dealer(dealer: usize, sits_out: Option<usize>, player_count: usize) -> usize {
     for offset in 1..=player_count {
         let seat = (dealer + offset) % player_count;
         if sits_out != Some(seat) {
@@ -191,13 +171,10 @@ impl Game for Euchre {
         card: Card,
     ) -> Result<PlayResult, String> {
         let sits_out = state.meta["sits_out"].as_u64().map(|v| v as usize);
-
-        // Going alone: only 3 active players, trick completes after 3 plays
-        if let Some(so) = sits_out {
-            return self.apply_play_going_alone(state, seat, card, so);
-        }
-
-        apply_play_generic(self, state, seat, card)
+        let active: Vec<usize> = (0..state.player_count)
+            .filter(|&s| sits_out != Some(s))
+            .collect();
+        apply_play_generic(self, state, seat, card, Some(&active))
     }
 
     fn trump_rank(&self, card: Card, state: &GameState) -> Option<u8> {
@@ -298,110 +275,10 @@ impl Game for Euchre {
 }
 
 // ---------------------------------------------------------------------------
-// Private apply_play for going-alone (3 active players)
+// Bidding sub-phase handlers
 // ---------------------------------------------------------------------------
 
 impl Euchre {
-    fn apply_play_going_alone(
-        &self,
-        state: &mut GameState,
-        seat: usize,
-        card: Card,
-        sits_out: usize,
-    ) -> Result<PlayResult, String> {
-        if state.phase != GamePhase::Playing {
-            return Err("game is not in the playing phase".into());
-        }
-        if state.current_player != seat {
-            return Err(format!(
-                "it is player {}'s turn, not player {seat}",
-                state.current_player
-            ));
-        }
-        if !state.hands[seat].contains(&card) {
-            return Err(format!("{card} is not in your hand"));
-        }
-
-        // Open a new trick when the player is leading
-        if state.current_trick.is_none() {
-            state.current_trick = Some(Trick::new(seat));
-        }
-
-        // Legality check
-        let legal = {
-            let hand = state.hands[seat].clone();
-            let trick = state.current_trick.as_ref().unwrap().clone();
-            self.legal_plays(&hand, &trick, state)
-        };
-        if !legal.contains(&card) {
-            return Err(format!("{card} is not a legal play"));
-        }
-
-        // Remove from hand, add to trick
-        let pos = state.hands[seat].iter().position(|c| *c == card).unwrap();
-        state.hands[seat].remove(pos);
-        state.current_trick.as_mut().unwrap().plays.push((seat, card));
-
-        // 3-player trick: complete after 3 plays
-        let plays_so_far = state.current_trick.as_ref().unwrap().plays.len();
-        if plays_so_far < 3 {
-            // Advance to next active player
-            let led_by = state.current_trick.as_ref().unwrap().led_by;
-            let next = self.next_active_in_trick(led_by, plays_so_far, sits_out);
-            state.current_player = next;
-            return Ok(PlayResult::Continuing);
-        }
-
-        // Trick complete
-        let trick = state.current_trick.take().unwrap();
-        let winner_idx = self.trick_winner(&trick, state);
-        let winner_seat = trick.plays[winner_idx].0;
-        let points: u8 = 0; // no card points in Euchre
-
-        let mut completed = trick;
-        completed.winner = Some(winner_seat);
-        state.completed_tricks.push(completed);
-        state.current_player = winner_seat;
-
-        // Game ends when all 3 active players' hands are empty
-        let active_empty = (0..4)
-            .filter(|&s| s != sits_out)
-            .all(|s| state.hands[s].is_empty());
-
-        if active_empty {
-            let tbp = state.tricks_by_player();
-            let scores = self.score_game(&tbp, state);
-            state.scores = scores.clone();
-            state.phase = GamePhase::Scoring;
-            return Ok(PlayResult::GameOver {
-                last_trick_winner: winner_seat,
-                last_trick_points: points,
-                scores,
-            });
-        }
-
-        Ok(PlayResult::TrickComplete { winner: winner_seat, points })
-    }
-
-    /// Given led_by and plays_so_far, return the seat of the next player in trick order,
-    /// skipping sits_out.
-    fn next_active_in_trick(&self, led_by: usize, plays_so_far: usize, sits_out: usize) -> usize {
-        // We need the seat of the player at position plays_so_far in the order
-        // starting from led_by, skipping sits_out.
-        let mut count = 0usize;
-        let mut seat = led_by;
-        loop {
-            seat = (seat + 1) % 4;
-            if seat == sits_out {
-                continue;
-            }
-            if count == plays_so_far - 1 {
-                return seat;
-            }
-            count += 1;
-        }
-    }
-
     // ── Ordering sub-phase (round 1) ─────────────────────────────────────────
 
     fn handle_ordering(
@@ -432,7 +309,7 @@ impl Euchre {
                 state.hands[dealer].push(turned_up);
 
                 state.meta["caller_seat"] = serde_json::json!(seat);
-                state.meta["called_suit"] = serde_json::json!(suit_str(called_suit));
+                state.meta["called_suit"] = serde_json::json!(called_suit.as_str());
                 state.meta["going_alone"] = serde_json::json!(alone);
 
                 if alone {
@@ -457,10 +334,25 @@ impl Euchre {
                 state.meta["passed_round1"] = serde_json::json!(passed);
 
                 if passed >= 4 {
-                    // All 4 passed round 1 — move to calling
+                    // All 4 passed round 1 — move to calling.
+                    // Broadcast callable suits so the client never has to derive them.
+                    let turned_up: Card = serde_json::from_value(state.meta["turned_up_card"].clone())
+                        .map_err(|e| format!("invalid turned_up_card: {e}"))?;
+                    let callable_suits: Vec<&str> = ["clubs", "spades", "hearts", "diamonds"]
+                        .iter()
+                        .copied()
+                        .filter(|&s| s != turned_up.suit.as_str())
+                        .collect();
                     state.meta["sub_phase"] = serde_json::json!("calling");
                     state.current_player = (state.dealer + 1) % 4;
-                    Ok(BidResult { phase_complete: false, hand_updated_seat: None, broadcast_payload: None })
+                    Ok(BidResult {
+                        phase_complete: false,
+                        hand_updated_seat: None,
+                        broadcast_payload: Some(serde_json::json!({
+                            "sub_phase": "calling",
+                            "callable_suits": callable_suits
+                        })),
+                    })
                 } else {
                     state.current_player = (state.dealer + 1 + passed) % 4;
                     Ok(BidResult { phase_complete: false, hand_updated_seat: None, broadcast_payload: None })
@@ -508,7 +400,7 @@ impl Euchre {
         state.meta["sub_phase"] = serde_json::json!("done");
 
         let sits_out = state.meta["sits_out"].as_u64().map(|v| v as usize);
-        state.current_player = first_active_after_dealer(dealer, sits_out);
+        state.current_player = first_active_after_dealer(dealer, sits_out, state.player_count);
 
         Ok(BidResult {
             phase_complete: true,
@@ -551,7 +443,7 @@ impl Euchre {
 
             "call" => {
                 let suit_str_val = value["suit"].as_str().ok_or("missing 'suit' field")?;
-                let suit = parse_suit(suit_str_val)
+                let suit = Suit::from_str(suit_str_val)
                     .ok_or_else(|| format!("unknown suit '{suit_str_val}'"))?;
 
                 if suit == turned_up_suit {
@@ -572,12 +464,12 @@ impl Euchre {
                 };
 
                 state.meta["caller_seat"] = serde_json::json!(seat);
-                state.meta["called_suit"] = serde_json::json!(suit_str(suit));
+                state.meta["called_suit"] = serde_json::json!(suit.as_str());
                 state.meta["going_alone"] = serde_json::json!(alone);
                 state.meta["sub_phase"] = serde_json::json!("done");
 
                 state.phase = GamePhase::Playing;
-                state.current_player = first_active_after_dealer(dealer, sits_out);
+                state.current_player = first_active_after_dealer(dealer, sits_out, state.player_count);
 
                 Ok(BidResult {
                     phase_complete: true,
@@ -613,7 +505,7 @@ mod tests {
 
     fn state_with_trump(trump: Suit) -> GameState {
         let mut state = GameState::new(Uuid::nil(), "euchre".into(), 4, 0);
-        state.meta = serde_json::json!({ "called_suit": suit_str(trump) });
+        state.meta = serde_json::json!({ "called_suit": trump.as_str() });
         state
     }
 
@@ -808,7 +700,7 @@ mod tests {
 
         // Get the turned-up suit
         let turned_up: Card = serde_json::from_value(state.meta["turned_up_card"].clone()).unwrap();
-        let turned_suit_str = suit_str(turned_up.suit);
+        let turned_suit_str = turned_up.suit.as_str();
 
         // Try to call the turned-up suit — should fail
         let cp = state.current_player;
@@ -850,7 +742,7 @@ mod tests {
         assert!(pass_result.is_err(), "dealer must call (stick the dealer)");
 
         // But calling a valid suit should succeed
-        let valid_suit = suit_str(other_suits[0]);
+        let valid_suit = other_suits[0].as_str();
         let call_result = Euchre.apply_bid(&mut state, 0, &serde_json::json!({"action": "call", "suit": valid_suit}));
         assert!(call_result.is_ok());
     }

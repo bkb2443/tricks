@@ -13,7 +13,7 @@ export const useGameStore = defineStore('game', () => {
   const sessionScores = ref<number[]>([])
   const sessionWinner = ref<number | null>(null)
   const completedTrick = ref<Trick | null>(null)
-  const currentTrickWinnerSeat = ref<number>(-1)
+  const currentTrickWinner = ref<number>(-1)
   const partnerRevealedSeat = ref<number | null>(null)
   const seats          = ref<SeatInfo[]>([])
   const lobbyChat      = ref<Array<{ from: string; text: string; timestamp: number }>>([])
@@ -43,23 +43,6 @@ export const useGameStore = defineStore('game', () => {
 
   const isLobby = computed(() => gameState.value?.phase === 'lobby')
 
-  const isCallingPhase = computed(() =>
-    gameState.value?.meta?.sub_phase === 'calling' && gameState.value?.phase === 'bidding'
-  )
-
-  const callableSuits = computed<string[]>(() => {
-    const cs = gameState.value?.meta?.callable_suits
-    return Array.isArray(cs) ? (cs as string[]) : []
-  })
-
-  const calledSuit = computed<string | null>(() => {
-    const cs = gameState.value?.meta?.called_suit
-    return typeof cs === 'string' ? cs : null
-  })
-
-  /** Index within current_trick.plays of the currently winning card, or -1 if no trick in progress.
-   *  Updated from server-sent `current_trick_winner` on each CardPlayed event. */
-  const currentTrickWinner = computed<number>(() => currentTrickWinnerSeat.value)
 
   /** Returns "You" for the local player's seat, the server-assigned name otherwise,
    *  falling back to "P{seat}" if names haven't loaded yet. */
@@ -84,7 +67,7 @@ export const useGameStore = defineStore('game', () => {
         gameState.value = update.state
         // The snapshot only populates our own hand slot; sync myHand from it.
         myHand.value = update.state.hands[seat.value!] ?? []
-        currentTrickWinnerSeat.value = -1
+        currentTrickWinner.value = -1
         break
 
       case 'hand_updated':
@@ -106,19 +89,8 @@ export const useGameStore = defineStore('game', () => {
           completedTrick.value = null
           s.current_trick = { led_by: update.player, plays: [[update.player, update.card]], winner: null }
         }
-        // Advance current_player to the next in trick order. The server does this
-        // internally but only sends CardPlayed, not the new current_player.
-        const trick = s.current_trick!
-        if (trick.plays.length < s.player_count) {
-          let nextPlayer = (trick.led_by + trick.plays.length) % s.player_count
-          if (s.game_name === 'euchre') {
-            const sitsOut = typeof s.meta?.sits_out === 'number' ? s.meta.sits_out as number : null
-            if (sitsOut !== null && nextPlayer === sitsOut) {
-              nextPlayer = (nextPlayer + 1) % s.player_count
-            }
-          }
-          s.current_player = nextPlayer
-        }
+        // The server sends the authoritative next player — no client-side turn arithmetic needed.
+        s.current_player = update.next_player
         // Remove the card from the local hand if we played it.
         if (update.player === seat.value) {
           const idx = myHand.value.findIndex(
@@ -127,7 +99,7 @@ export const useGameStore = defineStore('game', () => {
           if (idx !== -1) myHand.value.splice(idx, 1)
         }
         // Track the currently winning seat from the server-authoritative value.
-        currentTrickWinnerSeat.value = update.current_trick_winner ?? -1
+        currentTrickWinner.value = update.current_trick_winner ?? -1
         break
       }
 
@@ -138,7 +110,7 @@ export const useGameStore = defineStore('game', () => {
         gameState.value.completed_tricks.push(t)
         gameState.value.current_trick  = null
         gameState.value.current_player = update.winner
-        currentTrickWinnerSeat.value = -1
+        currentTrickWinner.value = -1
         // Hold the completed trick visible for 1.5s
         completedTrick.value = { ...t }
         if (pauseTimer !== null) clearTimeout(pauseTimer)
@@ -217,7 +189,7 @@ export const useGameStore = defineStore('game', () => {
     sessionScores.value = []
     sessionWinner.value = null
     completedTrick.value = null
-    currentTrickWinnerSeat.value = -1
+    currentTrickWinner.value = -1
     partnerRevealedSeat.value = null
     seats.value       = []
     lobbyChat.value   = []
@@ -231,8 +203,7 @@ export const useGameStore = defineStore('game', () => {
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
     partnerRevealedSeat, seats, lobbyChat, queueStatus, roomCode,
     // derived
-    phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName,
-    isCallingPhase, callableSuits, calledSuit, isLobby,
+    phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName, isLobby,
     // actions
     handleUpdate, reset,
   }

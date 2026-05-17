@@ -1,70 +1,10 @@
 use crate::engine::{Card, GameState, Rank, Suit, Trick};
 use crate::engine::game::Game;
 use crate::bot::{BotState, build_bot_state, current_winner, min_winning_trump, lowest_card};
-use crate::games::euchre::same_color_suit;
+use crate::games::euchre::rules::{plain_strength, trump_strength_for_suit};
 
-// ---------------------------------------------------------------------------
-// Local helpers
-// ---------------------------------------------------------------------------
-
-fn is_trump_for_suit(card: Card, suit: Suit) -> bool {
-    trump_rank_for_suit(card, suit) > 0
-}
-
-fn trump_rank_for_suit(card: Card, suit: Suit) -> u8 {
-    // Right bower
-    if card.rank == Rank::Jack && card.suit == suit {
-        return 8;
-    }
-    // Left bower
-    if card.rank == Rank::Jack && card.suit == same_color_suit(suit) {
-        return 7;
-    }
-    // Other trump
-    if card.suit == suit {
-        return match card.rank {
-            Rank::Ace   => 6,
-            Rank::King  => 5,
-            Rank::Queen => 4,
-            Rank::Ten   => 3,
-            Rank::Nine  => 2,
-            _ => 0,
-        };
-    }
-    0
-}
-
-#[allow(dead_code)]
-fn plain_card_rank(card: Card) -> u8 {
-    // A=6, K=5, Q=4, J=3, 10=2, 9=1
-    match card.rank {
-        Rank::Ace   => 6,
-        Rank::King  => 5,
-        Rank::Queen => 4,
-        Rank::Jack  => 3,
-        Rank::Ten   => 2,
-        Rank::Nine  => 1,
-        _ => 0,
-    }
-}
-
-fn parse_suit_local(s: &str) -> Option<Suit> {
-    match s {
-        "clubs"    => Some(Suit::Clubs),
-        "spades"   => Some(Suit::Spades),
-        "hearts"   => Some(Suit::Hearts),
-        "diamonds" => Some(Suit::Diamonds),
-        _ => None,
-    }
-}
-
-fn suit_str_local(suit: Suit) -> &'static str {
-    match suit {
-        Suit::Clubs    => "clubs",
-        Suit::Spades   => "spades",
-        Suit::Hearts   => "hearts",
-        Suit::Diamonds => "diamonds",
-    }
+fn is_trump(card: Card, suit: Suit) -> bool {
+    trump_strength_for_suit(card, suit).is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +33,8 @@ fn bid_ordering(state: &GameState, seat: usize) -> serde_json::Value {
 
     // Count trump cards if turned-up suit were called.
     // For the dealer, also count the turned-up card itself (they'd pick it up).
-    let mut trump_count = hand.iter().filter(|&&c| is_trump_for_suit(c, turned_suit)).count();
-    if seat == dealer && (!is_trump_for_suit(turned_up, turned_suit) || !hand.contains(&turned_up)) {
+    let mut trump_count = hand.iter().filter(|&&c| is_trump(c, turned_suit)).count();
+    if seat == dealer && (!is_trump(turned_up, turned_suit) || !hand.contains(&turned_up)) {
         // turned_up card is always trump for its own suit (it's a card of that suit)
         // The dealer would receive it
         trump_count += 1;
@@ -111,23 +51,23 @@ fn bid_ordering(state: &GameState, seat: usize) -> serde_json::Value {
 
 fn bid_discarding(state: &GameState, seat: usize) -> serde_json::Value {
     let hand = &state.hands[seat];
-    let called_suit = state.meta["called_suit"].as_str().and_then(parse_suit_local);
+    let called_suit = state.meta["called_suit"].as_str().and_then(Suit::from_str);
 
     // Discard the lowest plain (non-trump) card by rank.
     // If all trump, discard the weakest trump.
     if let Some(trump) = called_suit {
         let mut plain: Vec<Card> = hand.iter()
-            .filter(|&&c| !is_trump_for_suit(c, trump))
+            .filter(|&&c| !is_trump(c, trump))
             .copied()
             .collect();
         if !plain.is_empty() {
-            plain.sort_by_key(|c| plain_card_rank(*c));
+            plain.sort_by_key(|c| plain_strength(*c));
             let discard = plain[0];
             return serde_json::json!({"action": "discard", "card": discard});
         }
         // All trump — discard weakest trump
         let mut trump_cards: Vec<Card> = hand.to_vec();
-        trump_cards.sort_by_key(|c| trump_rank_for_suit(*c, trump));
+        trump_cards.sort_by_key(|c| trump_strength_for_suit(*c, trump));
         let discard = trump_cards[0];
         return serde_json::json!({"action": "discard", "card": discard});
     }
@@ -155,24 +95,24 @@ fn bid_calling(state: &GameState, seat: usize) -> serde_json::Value {
 
     // Count trump in hand for each callable suit
     let best = callable_suits.iter().max_by_key(|&&s| {
-        hand.iter().filter(|&&c| is_trump_for_suit(c, s)).count()
+        hand.iter().filter(|&&c| is_trump(c, s)).count()
     });
 
     if let Some(&best_suit) = best {
-        let count = hand.iter().filter(|&&c| is_trump_for_suit(c, best_suit)).count();
+        let count = hand.iter().filter(|&&c| is_trump(c, best_suit)).count();
         if is_stuck || count >= 2 {
             let alone = count >= 5;
             if alone {
-                return serde_json::json!({"action": "call", "suit": suit_str_local(best_suit), "alone": true});
+                return serde_json::json!({"action": "call", "suit": best_suit.as_str(), "alone": true});
             }
-            return serde_json::json!({"action": "call", "suit": suit_str_local(best_suit)});
+            return serde_json::json!({"action": "call", "suit": best_suit.as_str()});
         }
     }
 
     if is_stuck {
         // Must call something — pick the best suit even with 0
         if let Some(&fallback) = callable_suits.first() {
-            return serde_json::json!({"action": "call", "suit": suit_str_local(fallback)});
+            return serde_json::json!({"action": "call", "suit": fallback.as_str()});
         }
     }
 

@@ -452,7 +452,7 @@ impl Room {
     }
 
     pub fn play_card(&self, seat: usize, card: Card) -> Result<(), String> {
-        let (result, newly_revealed_partner, current_trick_winner) = {
+        let (result, newly_revealed_partner, current_trick_winner, next_player) = {
             let mut guard = self.state.lock().unwrap();
             let state = guard.as_mut().ok_or_else(|| "game not started".to_string())?;
             let partner_was_null = state.meta["partner"].is_null();
@@ -469,10 +469,10 @@ impl Room {
                 let idx = self.game.trick_winner(t, state);
                 t.plays[idx].0
             });
-            (result, newly_revealed, winner)
+            (result, newly_revealed, winner, state.current_player)
         };
 
-        self.broadcast(StateUpdate::CardPlayed { player: seat, card, current_trick_winner });
+        self.broadcast(StateUpdate::CardPlayed { player: seat, card, current_trick_winner, next_player });
 
         if let Some(partner_seat) = newly_revealed_partner {
             self.broadcast(StateUpdate::PartnerRevealed { seat: partner_seat });

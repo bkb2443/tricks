@@ -75,7 +75,10 @@ const partnerToast = computed(() => {
   return `${playerName(s)} is the partner!`
 })
 
-const calledSuit = computed(() => store.calledSuit)
+const calledSuit = computed<string | null>(() => {
+  const cs = store.gameState?.meta?.called_suit
+  return typeof cs === 'string' ? cs : null
+})
 </script>
 
 <template>

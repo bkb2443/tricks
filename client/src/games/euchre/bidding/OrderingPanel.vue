@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '@/stores/game'
-import { useGame } from '@/composables/useGame'
+import { useEuchreBidding } from '@/games/euchre/useEuchreBidding'
 import { useEuchreState } from '@/games/euchre/state'
 
 const store = useGameStore()
 const { playerName } = store
-const { orderUp, euchrePass } = useGame()
+const { orderUp, euchrePass } = useEuchreBidding()
 const { turnedUpCard } = useEuchreState()
 
 const state = computed(() => store.gameState!)

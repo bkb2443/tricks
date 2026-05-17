@@ -76,7 +76,7 @@ describe('game store', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing' }) })
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(1)
     expect(store.gameState?.current_trick?.led_by).toBe(1)
   })
@@ -91,38 +91,34 @@ describe('game store', () => {
         current_trick: { led_by: 1, plays: [[1, ACE_CLUBS]], winner: null },
       }),
     })
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(2)
   })
 
-  // BUG FIX: current_player must advance after each card_played so isMyTurn
-  // becomes true when it reaches the human — previously it was never updated.
-  it('card_played by another player advances current_player', () => {
+  it('card_played sets current_player from server-supplied next_player', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 1 }) })
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
     expect(store.gameState?.current_player).toBe(2)
 
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
     expect(store.gameState?.current_player).toBe(3)
   })
 
-  it('isMyTurn becomes true once current_player advances to human seat', () => {
+  it('isMyTurn becomes true once next_player reaches human seat', () => {
     const store = useGameStore()
-    // Human is seat 2; trick led by seat 0 (a bot)
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 0 }) })
 
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS, next_player: 1 })
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS })
-    expect(store.isMyTurn).toBe(true) // now it's seat 2's turn
+    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS, next_player: 2 })
+    expect(store.isMyTurn).toBe(true)
   })
 
-  // BUG FIX: played card must disappear from myHand — previously it remained.
   it('card_played for own card removes it from myHand', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
@@ -132,7 +128,7 @@ describe('game store', () => {
     })
     expect(store.myHand).toHaveLength(2)
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(KING_CLUBS)
   })
@@ -145,13 +141,12 @@ describe('game store', () => {
       state: makeState({ phase: 'playing', hands: [[], [ACE_CLUBS], [], [], []] }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS })
+    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS, next_player: 1 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(ACE_CLUBS)
   })
 
-  it('card_played does not update current_player after the last play in a trick', () => {
-    // All 5 players have played — trick_complete will set current_player, not card_played.
+  it('card_played always updates current_player to server next_player', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({
@@ -167,10 +162,9 @@ describe('game store', () => {
       }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES })
-    // 5 plays = trick complete; current_player should not be mangled by card_played
-    // (trick_complete hasn't arrived yet, so current_player stays at 4 until it does)
-    expect(store.gameState?.current_player).toBe(4)
+    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES, next_player: 0 })
+    // Server sends the trick winner as next_player; trick_complete will follow
+    expect(store.gameState?.current_player).toBe(0)
   })
 
   // ── trick_complete ──────────────────────────────────────────────────────────

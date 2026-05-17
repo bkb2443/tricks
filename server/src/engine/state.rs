@@ -155,7 +155,8 @@ pub enum StateUpdate {
     Snapshot { state: GameState },
     /// `current_trick_winner` is the seat currently winning the in-progress trick,
     /// or `None` if the trick just completed (server will emit TrickComplete separately).
-    CardPlayed { player: usize, card: Card, current_trick_winner: Option<usize> },
+    /// `next_player` is the seat whose turn it is after this play.
+    CardPlayed { player: usize, card: Card, current_trick_winner: Option<usize>, next_player: usize },
     TrickComplete { winner: usize, points: u8 },
     /// Per-hand result plus running session totals. Sent after each hand.
     HandComplete { hand_scores: Vec<i32>, session_scores: Vec<i32> },

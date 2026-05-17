@@ -35,6 +35,27 @@ pub struct Card {
     pub rank: Rank,
 }
 
+impl Suit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Suit::Clubs    => "clubs",
+            Suit::Spades   => "spades",
+            Suit::Hearts   => "hearts",
+            Suit::Diamonds => "diamonds",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "clubs"    => Some(Suit::Clubs),
+            "spades"   => Some(Suit::Spades),
+            "hearts"   => Some(Suit::Hearts),
+            "diamonds" => Some(Suit::Diamonds),
+            _ => None,
+        }
+    }
+}
+
 impl Card {
     pub fn new(suit: Suit, rank: Rank) -> Self {
         Self { suit, rank }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGameStore } from '@/stores/game'
-import { useGame } from '@/composables/useGame'
+import { useEuchreBidding } from '@/games/euchre/useEuchreBidding'
 import { useEuchreState } from '@/games/euchre/state'
 import HandComponent from '@/components/HandComponent.vue'
 import type { Card } from '@/engine/types'
@@ -9,7 +9,7 @@ import { sortHandEuchre } from '@/games/euchre/sort'
 
 const store = useGameStore()
 const { playerName } = store
-const { discard } = useGame()
+const { discard } = useEuchreBidding()
 const { calledSuit } = useEuchreState()
 
 const state = computed(() => store.gameState!)

@@ -84,28 +84,9 @@ export function useGame() {
     sendMessage({ type: 'extend_rejoin', seat })
   }
 
-  // ── Euchre bidding actions ────────────────────────────────────────────────
-
-  function orderUp(alone = false): void {
-    sendMessage({ type: 'bid', value: { action: 'order_up', alone } })
-  }
-
-  function euchrePass(): void {
-    sendMessage({ type: 'bid', value: { action: 'pass' } })
-  }
-
-  function discard(card: Card): void {
-    sendMessage({ type: 'bid', value: { action: 'discard', card } })
-  }
-
-  function callSuit(suit: string, alone = false): void {
-    sendMessage({ type: 'bid', value: { action: 'call', suit, alone } })
-  }
-
   return {
     store, connected,
     createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
     joinWithCode, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
-    orderUp, euchrePass, discard, callSuit,
   }
 }

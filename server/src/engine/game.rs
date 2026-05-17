@@ -51,11 +51,16 @@ pub enum PlayResult {
 
 /// Shared trick-taking logic. Used by the default `apply_play` and by game implementations
 /// that need pre/post hooks (e.g., Sheepshead partner revelation).
+///
+/// `active_seats`: when `Some`, only those seats participate (going-alone support).
+/// The trick completes after `active_seats.len()` plays and next-player advancement
+/// skips any seat not in the list. When `None`, all seats participate normally.
 pub fn apply_play_generic(
     game: &dyn Game,
     state: &mut GameState,
     seat: usize,
     card: Card,
+    active_seats: Option<&[usize]>,
 ) -> Result<PlayResult, String> {
     if state.phase != GamePhase::Playing {
         return Err("game is not in the playing phase".into());
@@ -90,12 +95,17 @@ pub fn apply_play_generic(
     state.hands[seat].remove(pos);
     state.current_trick.as_mut().unwrap().plays.push((seat, card));
 
-    // Not yet complete — advance to the next player in trick order
     let player_count = state.player_count;
+    let trick_size = active_seats.map(|s| s.len()).unwrap_or(player_count);
     let plays_so_far = state.current_trick.as_ref().unwrap().plays.len();
-    if plays_so_far < player_count {
+
+    // Not yet complete — advance to the next active player
+    if plays_so_far < trick_size {
         let led_by = state.current_trick.as_ref().unwrap().led_by;
-        state.current_player = (led_by + plays_so_far) % player_count;
+        state.current_player = match active_seats {
+            None => (led_by + plays_so_far) % player_count,
+            Some(active) => next_active_player(led_by, plays_so_far, active, player_count),
+        };
         return Ok(PlayResult::Continuing);
     }
 
@@ -110,8 +120,12 @@ pub fn apply_play_generic(
     state.completed_tricks.push(completed);
     state.current_player = winner_seat;
 
-    // Game ends when every hand is empty
-    if state.hands.iter().all(|h| h.is_empty()) {
+    // Game ends when all participating hands are empty
+    let game_over = match active_seats {
+        None => state.hands.iter().all(|h| h.is_empty()),
+        Some(active) => active.iter().all(|&s| state.hands[s].is_empty()),
+    };
+    if game_over {
         let tbp = state.tricks_by_player();
         let scores = game.score_game(&tbp, state);
         state.scores = scores.clone();
@@ -124,6 +138,22 @@ pub fn apply_play_generic(
     }
 
     Ok(PlayResult::TrickComplete { winner: winner_seat, points })
+}
+
+/// Returns the seat of the `plays_so_far`-th player in active-seat rotation from `led_by`.
+fn next_active_player(led_by: usize, plays_so_far: usize, active: &[usize], player_count: usize) -> usize {
+    let mut count = 0usize;
+    let mut seat = led_by;
+    loop {
+        seat = (seat + 1) % player_count;
+        if !active.contains(&seat) {
+            continue;
+        }
+        if count + 1 == plays_so_far {
+            return seat;
+        }
+        count += 1;
+    }
 }
 
 /// Every trick-taking game implements this trait. The engine calls through it;
@@ -192,75 +222,7 @@ pub trait Game: Send + Sync {
         state: &mut GameState,
         seat: usize,
         card: Card,
-    ) -> Result<PlayResult, String> {
-        if state.phase != GamePhase::Playing {
-            return Err("game is not in the playing phase".into());
-        }
-        if state.current_player != seat {
-            return Err(format!(
-                "it is player {}'s turn, not player {seat}",
-                state.current_player
-            ));
-        }
-        if !state.hands[seat].contains(&card) {
-            return Err(format!("{card} is not in your hand"));
-        }
-
-        // Open a new trick when the player is leading
-        if state.current_trick.is_none() {
-            state.current_trick = Some(Trick::new(seat));
-        }
-
-        // Legality check — clone to avoid a simultaneous borrow of state
-        let legal = {
-            let hand = state.hands[seat].clone();
-            let trick = state.current_trick.as_ref().unwrap().clone();
-            self.legal_plays(&hand, &trick, state)
-        };
-        if !legal.contains(&card) {
-            return Err(format!("{card} is not a legal play"));
-        }
-
-        // Remove from hand, add to trick
-        let pos = state.hands[seat].iter().position(|c| *c == card).unwrap();
-        state.hands[seat].remove(pos);
-        state.current_trick.as_mut().unwrap().plays.push((seat, card));
-
-        // Not yet complete — advance to the next player in trick order
-        let player_count = state.player_count;
-        let plays_so_far = state.current_trick.as_ref().unwrap().plays.len();
-        if plays_so_far < player_count {
-            let led_by = state.current_trick.as_ref().unwrap().led_by;
-            state.current_player = (led_by + plays_so_far) % player_count;
-            return Ok(PlayResult::Continuing);
-        }
-
-        // Trick is complete
-        let trick = state.current_trick.take().unwrap();
-        let winner_idx = self.trick_winner(&trick, state);
-        let winner_seat = trick.plays[winner_idx].0;
-        let points: u8 = trick.plays.iter().map(|(_, c)| self.card_points(*c)).sum();
-
-        let mut completed = trick;
-        completed.winner = Some(winner_seat);
-        state.completed_tricks.push(completed);
-        state.current_player = winner_seat;
-
-        // Game ends when every hand is empty
-        if state.hands.iter().all(|h| h.is_empty()) {
-            let tbp = state.tricks_by_player();
-            let scores = self.score_game(&tbp, state);
-            state.scores = scores.clone();
-            state.phase = GamePhase::Scoring;
-            return Ok(PlayResult::GameOver {
-                last_trick_winner: winner_seat,
-                last_trick_points: points,
-                scores,
-            });
-        }
-
-        Ok(PlayResult::TrickComplete { winner: winner_seat, points })
-    }
+    ) -> Result<PlayResult, String>;
 }
 
 /// The logical suit category of a card (distinguishes trump from plain suits).
