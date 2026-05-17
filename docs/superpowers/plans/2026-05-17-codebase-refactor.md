@@ -6,6 +6,8 @@
 
 **Format:** Each finding has a **Severity** (Critical / High / Medium / Low), a **Location** with file:line references, a **Why it matters** explanation, and a **Refactor** prescription. The end of the doc has a sequenced rollout.
 
+> **Post-merge update (2026-05-17, after `6be2853` + `ee28200` + Euchre work):** The Euchre game and a partial refactor of bots and the trick-winner protocol landed. The audit below has been revised in-place: each finding is tagged ✅ resolved / ⚠️ partial / ❌ open / 🆕 new (introduced by the merge). Six findings were resolved or partially resolved (C1, C2, C4, M5 partially, M10, M7-as-relocation). Five new findings were introduced, mostly because Euchre exposed asymmetries that didn't exist when only Sheepshead existed. Items already open before the merge are now **more** urgent because the second game makes every abstraction hole visible. See the "Post-Merge Status Update" section at the end for the re-prioritized rollout.
+
 ---
 
 ## Executive Summary
@@ -26,6 +28,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### C1. Duplicated `apply_play` body — engine/game.rs
 
+- **Status:** ✅ **Resolved** in `6be2853`. The default trait method now has no body — every `Game` impl must supply its own `apply_play`, which delegates to `apply_play_generic`. The free function gained an `active_seats: Option<&[usize]>` parameter to support Euchre's going-alone (one defender sits out). Both Sheepshead (`rules.rs:178`) and Euchre (`rules.rs:177`) now call it.
 - **Severity:** Critical (correctness time bomb)
 - **Location:** `server/src/engine/game.rs:54-127` (`apply_play_generic` free fn) and `server/src/engine/game.rs:190-263` (default trait method `Game::apply_play`)
 - **Why it matters:** These are line-for-line the same 70-line block. The free function exists so `Sheepshead::apply_play` (rules.rs:156-179) can run partner-revelation logic before delegating to it; the default trait method does the same work. Any fix to one (e.g., a turn-order bug, scoring edge case) will silently skip the other. This is the most dangerous duplication in the codebase because the failure mode is "the second game's rules silently differ from Sheepshead."
@@ -33,6 +36,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### C2. Client computes server state — stores/game.ts
 
+- **Status:** ⚠️ **Mostly resolved** in `ee28200`. `CardPlayed` now carries `current_trick_winner: Option<usize>` and `next_player: usize` (state.rs:159). The store reads them directly (game.ts:93, 102) instead of recomputing. `TrickDisplay.vue:27-31` reads `currentWinnerSeat` from props. **Still open:** `client/src/engine/sort.ts:75-104` retains `trickWinnerIndex` and the Sheepshead trump table — now dead code from the store, but `engine/sort.ts:54` `sortHand` still uses the local trump table to display Sheepshead hands in display order. See finding **N4** below: the Sheepshead trump table is still in a "generic" engine file rather than under `games/sheepshead/`.
 - **Severity:** Critical (architectural rule violation)
 - **Location:**
   - `client/src/stores/game.ts:97-125` — `card_played` handler advances `current_player` locally: `s.current_player = (trick.led_by + trick.plays.length) % s.player_count`
@@ -46,6 +50,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### C3. Stringly-typed game metadata — engine/state.rs
 
+- **Status:** ❌ **Still open and now twice as bad.** `meta: serde_json::Value` is unchanged. Euchre's rules.rs now adds 20+ new untyped accesses (`state.meta["turned_up_card"]`, `state.meta["sub_phase"]`, `state.meta["caller_seat"].as_u64()`, `state.meta["going_alone"].as_bool()`, `state.meta["sits_out"]`, `state.meta["passed_round1"]`, `state.meta["passed_round2"]`). The client `useEuchreState()` composable has type-guards `if (store.gameState?.game_name !== 'euchre') return null` on every getter — that's the cost of untyped meta surfacing.
 - **Severity:** Critical (type safety + abstraction leak)
 - **Location:** `server/src/engine/state.rs:43` (`meta: serde_json::Value`) and every access in `games/sheepshead/rules.rs` (e.g., `state.meta["picker"].as_u64().unwrap_or(0) as usize`, `state.meta["sub_phase"].as_str().unwrap_or("picking")`, `state.meta["going_alone"].as_bool().unwrap_or(false)` — repeated dozens of times in rules.rs, room.rs, and bot.rs)
 - **Why it matters:** Every read is a runtime cast with a silent fallback. A typo in `"sub_phsae"` is a compile-time pass and a runtime "always picking" bug. The bot module's `state.meta["called_suit"].as_str()` + `serde_json::from_str(&format!("\"{}\"", s))` round-trip is a smell on a smell. This also forces the client to treat `meta` as `Record<string, unknown>` (types.ts:37), pushing the same fragility forward.
@@ -60,6 +65,10 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### C4. Bot module hardcoded to Sheepshead — bot.rs
 
+- **Status:** ⚠️ **Half resolved** in `8db9ddc`. Per-game bot modules now exist: `server/src/games/sheepshead/bot.rs` and `server/src/games/euchre/bot.rs`. Generic helpers (`build_bot_state`, `current_winner`, `min_winning_trump`, `point_value`, `lowest_card`, `highest_point_card`) stayed in `server/src/bot.rs`. **What's still wrong:**
+  - Dispatch is via string match on `game_name`, not the trait: `server/src/games/mod.rs:16-30` has `match state.game_name.as_str() { "sheepshead" => ..., "euchre" => ... }`. Adding Hearts requires editing this file — exactly the Open/Closed violation the refactor was supposed to prevent. See finding **N5**.
+  - `server/src/bot.rs:151-158` adds a second dispatch layer (`bot::bid_action` → `games::bot_bid` → `sheepshead::bot::bid_action`). The room calls through `crate::bot::bid_action` (`room.rs:578`); should call through the trait.
+  - The generic helpers should move to `engine/bot_helpers.rs`; `bot.rs` becomes just the dispatcher and ideally that dispatcher disappears once `Game` owns `BotStrategy`.
 - **Severity:** Critical (Open/Closed violation; trait abstraction bypass)
 - **Location:**
   - `server/src/bot.rs:126` — `// FIXME: bid logic is hardcoded to Sheepshead; needs game: &dyn Game param when second game is added`
@@ -78,7 +87,8 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### C5. `Room` is a god object — lobby/room.rs
 
-- **Severity:** Critical (SRP — 676 lines, 8 responsibilities, 6 mutexes)
+- **Status:** ❌ **Still open.** `server/src/lobby/room.rs` is 683 lines now (was 676 — basically unchanged). All six mutexes still independent. The Euchre work didn't touch this file beyond minor adjustments.
+- **Severity:** Critical (SRP — 683 lines, 8 responsibilities, 6 mutexes)
 - **Location:** `server/src/lobby/room.rs` (entire file)
 - **Why it matters:** `Room` owns: seat lifecycle, name uniqueness, host election, broadcast plumbing, private channel routing, lobby chat with history, system chat, disconnect tracking with 30s timers, force-bot, extend-rejoin, game start, bot-driving async loop, hand transitions, session scoring, victory detection, snapshot redaction. Each is a reason to change. The two independent mutexes (`seats` and `state`) are an ordering hazard already — e.g., `start_game` locks `seats`, then `start_game_inner` locks `state`, while `bots_running` (an AtomicBool) tries to paper over the resulting race.
 - **Refactor:** Split into focused types that each own one concern, composed into `Room`:
@@ -100,7 +110,8 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H1. WebSocket handler has business logic — ws/handler.rs
 
-- **Severity:** High (separation of concerns)
+- **Status:** ❌ **Still open and now contains a latent bug.** `handler.rs:119, 121, 144` still hardcode `lobby.create_room(game, 5, 24)`. The literal `5` is wrong for Euchre (4 players); the literal `24` is wrong for Euchre's victory goal (typically 10). When a user calls "create Euchre room" today, the room is built with 5 seats and victory_goal=24. Combined with **N3** below (client hardcodes `VICTORY_GOAL = 10` in Euchre's GameTable), there is now a real seat-count/victory-goal disagreement between server and client.
+- **Severity:** High (separation of concerns + active bug for Euchre)
 - **Location:**
   - `server/src/ws/handler.rs:117-122` — JoinRoom auto-creates a room if `room_id` not found; defaults `victory_goal=24`
   - `server/src/ws/handler.rs:144` — `lobby.create_room(game, 5, 24)` — hardcodes player count and victory goal
@@ -114,6 +125,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H2. `useGameStore` is doing too much — stores/game.ts
 
+- **Status:** ❌ **Still open, and now asymmetrically wrong across games.** Euchre's game-specific state was correctly extracted into `client/src/games/euchre/state.ts` (`useEuchreState()` exposing `callerSeat`, `sitsOut`, `calledSuit`, `turnedUpCard`, `subPhase`). But Sheepshead's game-specific state (`picker`, `isPicker`, `partnerRevealedSeat`) is still mixed into `useGameStore` (game.ts:32-39, 17, 152-158). New asymmetry violates the CLAUDE.md standard added in `b3c946a` ("game-specific state ... live in separate Pinia stores"). See finding **N6**.
 - **Severity:** High (SRP on the client)
 - **Location:** `client/src/stores/game.ts` (entire file)
 - **Why it matters:** 14 top-level refs, 11 derived computeds, a 100-line `handleUpdate` switch, a setTimeout for trick display, another for partner reveal, plus reset(). Holds connection-adjacent state (`roomCode`, `seat`), game state (`gameState`, `myHand`), session state (`sessionScores`, `sessionWinner`), lobby state (`seats`, `lobbyChat`), queue state (`queueStatus`), and ephemeral UI state (`completedTrick`, `partnerRevealedSeat`). A new feature touches it; a test must mount it; a Sheepshead-specific change leaks across all consumers.
@@ -128,7 +140,8 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H3. `GameTable.vue` is 391 lines, 7 responsibilities
 
-- **Severity:** High (SRP on the client)
+- **Status:** ❌ **Significantly worse after the merge — promoted to "must fix before Hearts/Spades."** Instead of being decomposed, the file was **cloned**. `client/src/games/sheepshead/GameTable.vue` (395 lines) and `client/src/games/euchre/GameTable.vue` (425 lines) are 80%+ identical: phase toast, header, seat rail, trick display invocation, my-hand section, session scoreboard, hand-complete view, session-over view, completed-trick history, and ~200 lines each of essentially identical CSS. Compare `GameTable.vue` for both — the script blocks differ only in role-badge fields (picker vs caller/sits-out) and a few words; the templates differ only in which game-specific store provides badges; the styles differ in caller vs picker color. Hearts/Spades will create a third and fourth copy. See finding **N1**.
+- **Severity:** Critical (was High) — duplication is now actively blocking new games
 - **Location:** `client/src/games/sheepshead/GameTable.vue`
 - **Why it matters:** One file owns header (phase/dealer/trick counter), seat rail, trick display orchestration, bidding panel mounting, my-hand section with role/turn badges, session scoreboard, hand-complete view, session-over view, phase toast, partner toast, and trick-history disclosure. Iterating on the scoreboard requires re-reasoning about the toast layer.
 - **Refactor:** Decompose into:
@@ -149,6 +162,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H4. `BiddingPanel.vue` mixes three sub-phases
 
+- **Status:** ⚠️ **Half resolved.** Euchre's `BiddingPanel.vue` (40 lines) correctly switches into `OrderingPanel`, `DiscardingPanel`, `CallingPanel` sub-components. Sheepshead's `BiddingPanel.vue` (159 lines) was untouched — still has picking/burying/calling all inline, with `burySelection` ref leaking across sub-phases. Asymmetry. See finding **N7**.
 - **Severity:** High (SRP)
 - **Location:** `client/src/games/sheepshead/BiddingPanel.vue` (153 lines)
 - **Why it matters:** Picking, burying, and calling are different game mechanics with different UIs, different validation, and different "whose turn is it" rules. They share only a wrapper div. Three `<template v-else-if>` branches each gate a different control set, and `burySelection` ref leaks across sub-phases.
@@ -163,6 +177,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H5. Lock granularity and ordering — Room
 
+- **Status:** ❌ **Still open.** Unchanged.
 - **Severity:** High (correctness)
 - **Location:** `server/src/lobby/room.rs:81-89` — `seats: Mutex<Vec<SeatState>>`, `state: Mutex<Option<GameState>>`, `session_scores: Mutex<Vec<i32>>`, `chat_history: Mutex<VecDeque<...>>`, `max_hands: Mutex<Option<u32>>`, `hands_played: Mutex<u32>` — six independent mutexes
 - **Why it matters:** `start_game` (`room.rs:265-276`) locks `seats`, drops, then `start_game_inner` locks `state`. `play_card` (`room.rs:454-514`) locks `state`, drops, then locks `session_scores`, then `hands_played`, then `max_hands`. Any code path that needs two together at once invites a deadlock the moment someone reorders. `drive_bots` (`room.rs:529-586`) re-locks `state` 5+ times in one iteration, each acquire/release racing with player input.
@@ -173,13 +188,15 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H6. Default victory goal & player count are magic numbers
 
-- **Severity:** Medium-High
+- **Status:** ❌ **Still open and now causes an active server/client disagreement for Euchre.** Server hardcodes `(game, 5, 24)` in `handler.rs:119, 121, 144` and `matchmaker.rs:80` regardless of game. Client hardcodes `VICTORY_GOAL = 24` for Sheepshead and `VICTORY_GOAL = 10` for Euchre in the respective GameTables. An Euchre room therefore opens with 5 seats and a server victory goal of 24, while the client displays "first to 10" — they are computing different things. See finding **N3**.
+- **Severity:** High (was Medium-High) — now a real bug, not just a smell
 - **Location:** `server/src/ws/handler.rs:119, 121, 144`, `server/src/lobby/matchmaker.rs:80` — all hardcode `lobby.create_room(<game>, 5, 24)`. Client `client/src/games/sheepshead/GameTable.vue:34` hardcodes `VICTORY_GOAL = 24`.
 - **Why it matters:** Adding Hearts/Euchre/Spades means finding every `24` and `5` literal. The client constant will drift from the server's the first time someone changes one.
 - **Refactor:** Add `fn default_victory_goal(&self) -> i32` and `fn default_player_count(&self) -> usize` to `Game`. Server reads from the trait. Server includes `victory_goal` in the `Snapshot` payload (or in a new `RoomConfig` message sent on join). Client reads from the snapshot, never from a constant.
 
 ### H7. Bot driver spawn-and-forget — handler.rs and room.rs
 
+- **Status:** ❌ **Still open.** Unchanged — `handler.rs:189-191, 201-203` still `tokio::spawn(drive_bots)` after every Bid/PlayCard, and `bots_running: AtomicBool` is the only thing keeping them from piling up.
 - **Severity:** High (correctness, resource leaks)
 - **Location:** `server/src/ws/handler.rs:189-191, 201-203` — `tokio::spawn(async move { room_arc.drive_bots().await })` after every successful Bid/PlayCard. `server/src/lobby/room.rs:529-532` — `bots_running` AtomicBool guards reentry.
 - **Why it matters:** Every player action spawns a task that immediately checks an atomic and returns. The AtomicBool guard is correct only because the loop is one-shot per call; the design is "spawn-then-noop" which is a code smell. Worse, the lobby `start_game` does `tokio::spawn(drive_bots)` at room.rs:273 too — but if a player action lands before the spawn happens, the spawn at handler.rs:190 races with it.
@@ -187,13 +204,15 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H8. Snapshot-redaction logic duplicated
 
-- **Severity:** Medium-High (duplication)
+- **Status:** ❌ **Still open and now masks game-specific visibility rules.** Both call sites (`room.rs:381-388` rejoin and `room.rs:596-608` start_next_hand) still unconditionally `view.extra_piles.clear()`. Euchre's `turned_up_card` lives in `meta` so it survives the redaction, but Euchre's `kitty` is an `extra_pile` so it's always wiped — which happens to be correct, but only by luck. If Sheepshead ever wants to show the blind face-up post-pick (a common variant), the redaction will silently hide it. The room has no game-trait hook to ask "which piles are visible to seat X right now?".
+- **Severity:** Medium-High (duplication, now also a latent abstraction hole)
 - **Location:** `server/src/lobby/room.rs:381-388` (rejoin), `server/src/lobby/room.rs:596-602` (start_next_hand) — both clone state, clear other hands, clear extra_piles.
 - **Why it matters:** Redaction rules are scattered. When game-specific rules decide some piles ARE visible (e.g., Sheepshead post-pick reveal of the blind to all, if that became a feature), it'll be missed in one of the two places.
 - **Refactor:** `GameState::redacted_for(&self, seat: usize, game: &dyn Game) -> GameState`. The `Game` trait gets a hook `fn visible_extra_piles(&self, state: &GameState, seat: usize) -> Vec<&str>` so games can opt extra piles back in. Both call sites become one line.
 
 ### H9. Protocol types duplicated between Rust and TypeScript
 
+- **Status:** ❌ **Still open.** No `ts-rs`/`typeshare`. `CardPlayed` got two new fields server-side and client-side as a matched pair — that's the kind of change that will rot the first time someone updates only one side.
 - **Severity:** High (drift surface area)
 - **Location:** `server/src/engine/state.rs` (ClientMessage, StateUpdate, GameState, SeatInfo, GamePhase) vs `client/src/engine/types.ts` (same shapes restated)
 - **Why it matters:** Every protocol change requires editing two files. CLAUDE.md flags this as TODO ("consider generating TypeScript types from Rust structs via `typeshare` or `ts-rs`") — it should not remain a TODO. Today the duplication is small; the day Sheepshead picks up calling-from-the-blind variants it'll be the source of every "client and server disagree about message shape" bug.
@@ -201,6 +220,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H10. `extra_piles: Vec<(String, Vec<Card>)>` is stringly-typed
 
+- **Status:** ❌ **Still open and now plural.** Sheepshead writes `"blind"` and Euchre writes `"kitty"` (`server/src/games/euchre/rules.rs:129`). Two magic strings, no shared key type.
 - **Severity:** Medium-High
 - **Location:** `server/src/engine/state.rs:37`, used in `engine/dealer.rs:13`, `games/sheepshead/rules.rs:97-98, 398-403`
 - **Why it matters:** "blind" is a magic string. The Sheepshead pick code does `iter().position(|(name, _)| name == "blind")` — fragile and untyped.
@@ -212,45 +232,52 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### M1. Duplicated scoring logic — sheepshead/rules.rs
 
+- **Status:** ❌ **Still open.** `rules.rs` unchanged.
 - **Location:** `server/src/games/sheepshead/rules.rs:288-356` — the "going alone" and "called partner" branches each compute identical schneider gates with copy-pasted match arms.
 - **Refactor:** Extract `fn schneider_score(picker_share: i32, defender_share: i32, mode: ScoreMode) -> ScoreDistribution`. Both branches become one call with `ScoreMode::Alone` or `ScoreMode::Partner`.
 
 ### M2. `apply_bid` broadcasts via opaque JSON — bid_result
 
+- **Status:** ❌ **Still open.** Euchre uses the same opaque-JSON pattern: `euchre/rules.rs:351` constructs `broadcast_payload: Some(serde_json::json!({...}))` for the round-1-to-round-2 transition.
 - **Location:** `server/src/engine/game.rs:30-31` (`BidResult.broadcast_payload: Option<serde_json::Value>`)
 - **Why it matters:** Re-introduces the stringly-typed escape hatch (C3) into the protocol layer. The room blindly forwards the JSON, so consumers (incl. the bot) parse a payload whose shape only the game module knows.
 - **Refactor:** Define an enum `BidBroadcast { Raw, SubPhaseUpdate { sub_phase: SubPhase, callable_suits: Vec<SuitName> }, ... }` per game (or globally). The room can pattern-match instead of forwarding opaque blobs.
 
 ### M3. `Sheepshead::deal` panics on invalid input
 
-- **Location:** `server/src/games/sheepshead/rules.rs:76-77` — `assert_eq!(player_count, 5, ...)`, `assert_eq!(shuffled_deck.len(), 32, ...)`
+- **Status:** ❌ **Still open and now plural.** Euchre adds new asserts: `euchre/rules.rs:102-103, 122` (player_count=4, deck=24, kitty=4). Per **H1** above, if a Euchre room ever opens with the wrong seat count due to the handler hardcoding `5`, this will crash a tokio task instead of returning an error.
+- **Location:** `server/src/games/sheepshead/rules.rs:76-77` — `assert_eq!(player_count, 5, ...)`, `assert_eq!(shuffled_deck.len(), 32, ...)` — and now Euchre as well.
 - **Why it matters:** A misconfigured room (or a future bug that lets a 4-player Sheepshead room start) crashes the tokio task with a panic instead of erroring out cleanly. `Game::deal` currently returns `DealResult`; making it `Result<DealResult, GameError>` lets the room surface the error to the client.
 - **Refactor:** Change `Game::deal -> Result<DealResult, GameError>`. Validation moves from runtime asserts to the trait contract.
 
 ### M4. `Result<_, String>` everywhere — no typed errors
 
+- **Status:** ❌ **Still open.**
 - **Location:** All `apply_bid`, `apply_play`, `handle_lobby_chat`, `force_bot`, `extend_rejoin`, etc. (See `engine/game.rs:177-181`, `lobby/room.rs:226-247, 398-427`)
 - **Why it matters:** `thiserror = "2"` is already a dependency (Cargo.toml:17) but unused. String errors mean callers can't pattern-match (e.g., distinguish "not your turn" from "card not in hand" from "wrong sub-phase") and the client can't localize messages.
 - **Refactor:** Introduce `engine::GameError`, `engine::ProtocolError`, `lobby::RoomError` enums with `thiserror`. Map at the protocol boundary to a typed client-facing error (e.g., `{ code: 'not_your_turn', message: '...' }`) so the client can show different UI for different errors.
 
 ### M5. `#![allow(dead_code)]` with stale TODOs
 
+- **Status:** ❌ **Still open.** `room.rs:1-3` and `matchmaker.rs:1-2` still reference "Task 6". Nothing changed.
 - **Location:** `server/src/lobby/room.rs:1-3` and `server/src/lobby/matchmaker.rs:1-2` reference "Task 6" of a plan whose tasks are long done.
 - **Refactor:** Remove the file-level allow. Audit the `#[allow(dead_code)]` markers on individual items — many (e.g., `SeatState::is_human`, `SeatState::ws_id` on disconnected variants) are actually used; the rest should be deleted.
 
 ### M6. Bot's `point_value` duplicates `Game::card_points`
 
+- **Status:** ❌ **Still open.** `bot.rs:53-62` still defines `point_value(card)` with the Sheepshead-specific table baked in (Ace=11, Ten=10, etc.). `lowest_card` and `highest_point_card` (bot.rs:116-144) both call it. Since Euchre has different card_points (0 for everything — Euchre scores tricks, not points), passing Euchre cards through `lowest_card`/`highest_point_card` will sort them by *Sheepshead* point values. Check whether `euchre/bot.rs` actually relies on these helpers — if so, this is a latent ranking bug for Euchre bots.
 - **Location:** `server/src/bot.rs:53-62`
 - **Refactor:** Delete `point_value`; call `game.card_points(card)` (already in scope as `&dyn Game`).
 
 ### M7. Trump rules duplicated client-side — engine/sort.ts
 
-- **Location:** `client/src/engine/sort.ts:7-32` reproduces the Sheepshead trump rank table
-- **Why it matters:** Already covered under C2 — listed here for the second-game audit. Even if the server starts sending pre-sorted hands, this file shouldn't grow Euchre's dynamic-trump rules.
-- **Refactor:** Either delete (server pre-sorts and tags winning play) or move the table into `client/src/games/sheepshead/sort.ts` so it's clearly the Sheepshead-only fallback.
+- **Status:** ⚠️ **Partially resolved**. Euchre's sort logic correctly lives in `client/src/games/euchre/sort.ts` and uses an `Euchre`-specific `sortHandEuchre(cards, calledSuit)`. **But** the Sheepshead trump table was never moved out of `engine/sort.ts` — it's still imported as a "generic" sort via `HandComponent.vue:4` `import { sortHand } from '@/engine/sort'`. `HandComponent.vue:11, 16` now accepts an optional `sortFn` prop, which Euchre uses (`euchre/GameTable.vue:84, 157`); Sheepshead still relies on the default `engine/sort.ts` import, which is hardcoded to Sheepshead's rules. The dead `trickWinnerIndex` (`engine/sort.ts:75-104`) is also still exported. See finding **N4**.
+- **Location:** `client/src/engine/sort.ts:7-32` reproduces the Sheepshead trump rank table; `engine/sort.ts:75-104` is dead.
+- **Refactor:** Move the Sheepshead trump table into `client/src/games/sheepshead/sort.ts`; create a `useSheepsheadSort()` analogue to Euchre's; make Sheepshead's GameTable pass `:sort-fn` to `HandComponent` like Euchre does; delete `trickWinnerIndex` entirely (server is authoritative now).
 
 ### M8. `useGame.ts` mixes generic and Sheepshead-specific actions
 
+- **Status:** ⚠️ **Half resolved.** Euchre's bidding actions live in `client/src/games/euchre/useEuchreBidding.ts` (`orderUp`, `euchrePass`, `discard`, `callSuit`). But Sheepshead's `pick`/`pass`/`bury`/`callAce`/`goAlone` are still in the generic `useGame()` (`useGame.ts:33-51`). Asymmetry again.
 - **Location:** `client/src/composables/useGame.ts:33-51` — `pick`, `pass`, `bury`, `callAce`, `goAlone` are Sheepshead-specific in a file named "useGame"
 - **Refactor:** Split into:
   - `useGameActions()` — `playCard`, `startGame`, `sendLobbyChat`, `forceBot`, `extendRejoin`, queue actions
@@ -259,14 +286,13 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### M9. Magic timeouts scattered across the codebase
 
-- **Location:** `room.rs:321` (30s rejoin), `room.rs:527` (1200ms bot delay), `matchmaker.rs:13` (60s queue timeout), `matchmaker.rs:14` (8 max hands), `stores/game.ts:140` (1500ms completed-trick hold), `stores/game.ts:177` (2000ms partner reveal), `GameTable.vue:64` (1500ms phase toast)
+- **Status:** ❌ **Still open and now plural** — Euchre's GameTable adds its own 1500ms phase-toast timer (`euchre/GameTable.vue:75`).
+- **Location:** `room.rs:321` (30s rejoin), `room.rs:534` (1200ms bot delay), `matchmaker.rs:13` (60s queue timeout), `matchmaker.rs:14` (8 max hands), `stores/game.ts:120` (1500ms completed-trick hold), `stores/game.ts:157` (2000ms partner reveal), `sheepshead/GameTable.vue:63` and `euchre/GameTable.vue:75` (1500ms phase toast).
 - **Refactor:** Centralize: server in `server/src/config.rs` (loadable from env for tests/prod), client in `client/src/config.ts`.
 
 ### M10. Hardcoded `<sheepshead-table>` in GameView
 
-- **Location:** `client/src/views/GameView.vue:16`
-- **Why it matters:** Plug-and-play games require switching on `game_name`, but there's no registry pattern yet — adding Euchre means editing GameView.
-- **Refactor:** A `games/index.ts` registry: `{ sheepshead: SheepsheadTable, euchre: EuchreTable }` keyed by name. GameView uses `<component :is="registry[gameName]" />`.
+- **Status:** ✅ **Resolved** in `ee28200`. `GameView.vue` now uses `<component :is="gameTable" />` with a registry `GAME_TABLES` (`GameView.vue:8-11`) using `defineAsyncComponent` for lazy-loading. There's also a separate `client/src/engine/games.ts` `GAMES` registry exposing game metadata (label, playerCount). Two registries that could be unified eventually, but the hardcoding is gone.
 
 ---
 
@@ -390,6 +416,198 @@ Goal: small components, each with one responsibility.
 - [ ] **P6.4** Accessibility pass (L3)
 - [ ] **P6.5** Test coverage for `Room` paths (L7)
 - [ ] **P6.6** Reconcile CLAUDE.md card-encoding note (L8)
+
+---
+
+---
+
+## Post-Merge New Findings (introduced by the Euchre work)
+
+These were not in the original review because Sheepshead-only code wasn't exhibiting them. Adding Euchre made each one visible.
+
+### N1. `GameTable.vue` was cloned, not decomposed — sheepshead/euchre
+
+- **Severity:** Critical (now the largest single blocker to adding a third game)
+- **Location:** `client/src/games/sheepshead/GameTable.vue` (395 lines) and `client/src/games/euchre/GameTable.vue` (425 lines)
+- **Why it matters:** Diff the two files: phase-toast, header (phase badge + dealer + trick counter), seat rail, `<trick-display>` invocation, my-hand section with role badges + your-turn glow, session scoreboard with progress bar, between-hand result, session-over with router-link to lobby, completed-trick history disclosure — all identical in structure with cosmetically different role-badge labels. The CSS blocks are essentially identical (~190 lines each). Every layout fix or design-token tweak now has to be made twice. A third game makes it three; a CSS migration touches all of them.
+- **Refactor:** Extract a shared `<GameTableShell>` (or just put the layout in `views/GameView.vue` and demote `sheepshead/GameTable.vue` to a `<SheepsheadBidding>` slot). Concretely:
+  ```
+  views/GameView.vue
+   ├── <GameHeader>             generic (reads phase, dealer, names)
+   ├── <SeatRail>               accepts a slot for game-specific role badges
+   ├── <TrickDisplay>           already exists
+   ├── <component :is="biddingPanel" />     game-specific
+   ├── <MyHandPanel>            accepts game-specific badges slot + sort-fn
+   ├── <SessionScoreboard>      generic, reads victory_goal from server
+   ├── <HandResult>             generic
+   ├── <SessionResult>          generic
+   ├── <CompletedTrickHistory>  generic
+   └── <PhaseToast> + game-specific toasts
+  ```
+  Both Sheepshead and Euchre GameTable wrappers shrink to ~40 lines: just register the game-specific bidding panel and the badge slots.
+
+### N2. Server-side bot dispatch by `match game_name` — games/mod.rs
+
+- **Severity:** High (Open/Closed bypass via string match)
+- **Location:** `server/src/games/mod.rs:16-30` — `bot_bid` and `bot_play` switch on `state.game_name.as_str()`.
+- **Why it matters:** Adding Hearts requires editing this file, plus `get_game` at line 8 (which is unavoidable for now without a static registry, but `bot_bid`/`bot_play` are avoidable). This is exactly the abstraction bypass that C4 was supposed to close. The bot's per-game module already implements `bid_action`/`play_card` — those should be reachable through the `Game` trait (e.g., as a `&dyn BotStrategy` returned by `Game::bot_strategy(&self) -> &dyn BotStrategy`).
+- **Refactor:** Either add `BotStrategy` as an associated type / trait-object on `Game`, or make `bot_bid`/`bot_play` two more required trait methods on `Game` directly. The room calls `self.game.bot_bid(state, seat)` and `self.game.bot_play(state, seat)` — no string dispatch needed. Delete `crate::bot::bid_action`/`play_card` wrappers, and the `games::bot_bid`/`bot_play` dispatchers along with them.
+
+### N3. Server victory_goal/player_count disagree with client for Euchre
+
+- **Severity:** High (active bug; Euchre rooms misconfigured at room creation)
+- **Location:**
+  - Server: `handler.rs:119, 121, 144` hardcode `lobby.create_room(game, 5, 24)`; `matchmaker.rs:80` hardcodes `lobby.create_room("sheepshead".into(), 5, 24)`.
+  - Client: `client/src/games/sheepshead/GameTable.vue:34` `VICTORY_GOAL = 24`; `client/src/games/euchre/GameTable.vue:23` `VICTORY_GOAL = 10`.
+- **Why it matters:** Creating a Euchre room today builds it with 5 seats (Euchre is 4-player) and victory_goal=24 server-side, while the client shows "first to 10". Either the server's session winner detection fires never (24-point victory is rare in Euchre), the seat count rejects valid Euchre player counts, or both. This is functional drift, not a smell.
+- **Refactor:** Add `Game::default_victory_goal(&self) -> i32` and `Game::default_player_count(&self) -> usize` (or use `valid_player_counts()[0]`). Lobby creation reads from the trait. Server includes `victory_goal` and `player_count` in `Snapshot` (or a new `RoomConfig` message). Client reads from snapshot, deletes `VICTORY_GOAL` constants. `client/src/engine/games.ts` `GAMES` registry already has `playerCount` baked in client-side — that's another piece that should come from the server, not be duplicated.
+
+### N4. Sheepshead trump table still lives in `engine/sort.ts` (asymmetry from Euchre)
+
+- **Severity:** Medium (game-specific code in "engine" namespace)
+- **Location:**
+  - `client/src/engine/sort.ts:7-32` — Sheepshead trump rank table (queens/jacks per suit, diamond ranks)
+  - `client/src/engine/sort.ts:75-104` — dead `trickWinnerIndex` (no longer called by the store)
+  - Compare: `client/src/games/euchre/sort.ts:9-22` — Euchre's trump table correctly lives under `games/euchre/`
+- **Why it matters:** `engine/` should be game-agnostic per CLAUDE.md. The Euchre work correctly placed Euchre's sort under `games/`. The Sheepshead equivalent didn't move. `HandComponent.vue:16` falls back to the "engine" sort when no `sortFn` prop is provided — and that fallback bakes in Sheepshead rules.
+- **Refactor:** Move `sortHand` and the trump table to `client/src/games/sheepshead/sort.ts` (parallel to `euchre/sort.ts`). Update Sheepshead's `GameTable.vue` to pass `:sort-fn` to `HandComponent` like Euchre does. Delete `trickWinnerIndex` and `SUIT_ORDER` from `engine/sort.ts` (Euchre imports `SUIT_ORDER` from there — move that constant to a shared `engine/display.ts` or duplicate it under each game, since the fail-suit display order is itself a game-specific decision).
+
+### N5. Sheepshead's `BiddingPanel.vue` not split (asymmetry from Euchre)
+
+- **Severity:** High (SRP) — promoted from the second half of H4
+- **Location:** `client/src/games/sheepshead/BiddingPanel.vue` (159 lines) still mixes picking, burying, and calling sub-phases. `burySelection` ref leaks across sub-phase boundaries.
+- **Why it matters:** Euchre's `BiddingPanel.vue` is 40 lines because it dispatches into `OrderingPanel`/`DiscardingPanel`/`CallingPanel`. The Sheepshead equivalent should follow the same pattern. The asymmetry is what makes it noticeable — same conceptual layout, two different implementations.
+- **Refactor:** Mirror Euchre's structure:
+  ```
+  client/src/games/sheepshead/
+   ├── BiddingPanel.vue              ← shrinks to a switch
+   └── bidding/
+        ├── PickingPanel.vue         ← pick/pass buttons + waiting state
+        ├── BuryingPanel.vue         ← owns burySelection ref, validates, submits
+        └── CallingPanel.vue         ← callable suits + go-alone
+  ```
+
+### N6. Sheepshead-specific state still in `useGameStore` (asymmetry from Euchre)
+
+- **Severity:** High (SRP, asymmetry, breaks the CLAUDE.md standard we just wrote)
+- **Location:**
+  - `client/src/stores/game.ts:32-39` — `picker`, `isPicker` computeds
+  - `client/src/stores/game.ts:17` — `partnerRevealedSeat` ref
+  - `client/src/stores/game.ts:152-158` — `partner_revealed` event handler with setTimeout
+  - `client/src/games/sheepshead/GameTable.vue:41-44, 78-81` — recomputes `partnerSeat` and `calledSuit` ad-hoc in the component
+- **Why it matters:** Euchre got its own `useEuchreState()` composable (`client/src/games/euchre/state.ts`) exposing all game-specific reads with type guards. Sheepshead never got the equivalent. The standard added in `b3c946a` says "game-specific state ... live in separate Pinia stores" — Sheepshead violates it because the work stopped at Euchre.
+- **Refactor:** Create `client/src/games/sheepshead/state.ts` with `useSheepsheadState()` exposing `picker`, `isPicker`, `partnerSeat`, `calledSuit`, `isPickingPhase`, `isBuryPhase`, `isCallingPhase`, `callableSuits`, `partnerRevealedSeat`. Move the `partner_revealed` setTimeout into a `usePartnerRevealToast()` composable owned by the Sheepshead GameTable, not the global store. Strip those concepts out of `useGameStore`.
+
+### N7. Two layers of bot dispatch indirection — bot.rs
+
+- **Severity:** Medium (cleanup; depends on N2 being done first)
+- **Location:** `server/src/bot.rs:151-158` — `bot::bid_action` calls `crate::games::bot_bid`; `bot::play_card` calls `crate::games::bot_play`. The room (`room.rs:578, 585`) calls `bot::bid_action`/`play_card`, which forwards to `games::bot_bid`, which switches on `game_name` and calls `sheepshead::bot::bid_action`. Three layers to get from caller to callee.
+- **Refactor:** Once N2 lands (BotStrategy on the trait), delete both shim layers. `room.rs` calls `self.game.bot_bid(state, seat)`. Generic helpers (`build_bot_state`, `current_winner`, `min_winning_trump`, `lowest_card`, `highest_point_card`) move to `engine/bot_helpers.rs`. `server/src/bot.rs` disappears.
+
+### N8. `point_value` in shared bot helpers is Sheepshead-specific
+
+- **Severity:** Medium-High (potential ranking bug for Euchre bots)
+- **Location:** `server/src/bot.rs:53-62` `point_value` table is `Ace=11, Ten=10, King=4, Queen=3, Jack=2` — Sheepshead's scoring. `lowest_card` and `highest_point_card` (bot.rs:116-144) use this table to sort cards for sluffing decisions.
+- **Why it matters:** Euchre's `card_points` is uniform (Euchre scores tricks won, not card points). If `euchre::bot` calls into these shared helpers, defenders/partners will sluff cards ranked by *Sheepshead* points — wrong choice for Euchre. Verify whether `euchre/bot.rs` actually uses `lowest_card`/`highest_point_card`; if yes, fix by calling `game.card_points(card)` and treating Euchre's all-zeros table as "use rank as the tiebreaker."
+- **Refactor:** Subsumed by M6 — fix by routing through `game.card_points`.
+
+---
+
+## Post-Merge Status Update — Re-Prioritized Rollout
+
+Given the merge, here is the work re-sequenced. **The biggest change to the original sequence is promoting N1 (GameTable cloning) and N3 (Euchre config disagreement) above almost everything else**, because they're either active bugs or active blockers to the third game.
+
+### Phase 0 — Active bug fixes (do first)
+
+- [ ] **P0.1 — N3** Pipe `victory_goal`/`player_count` through the `Game` trait and the `Snapshot` payload so Euchre rooms get the right values. Delete client `VICTORY_GOAL` constants. (Resolves H6 too.)
+- [ ] **P0.2 — N8/M6** Audit whether `euchre/bot.rs` reaches into `lowest_card`/`highest_point_card`; if so, fix the sluff-ranking by routing through `Game::card_points`.
+
+### Phase 1 — Lock in symmetry between Sheepshead and Euchre
+
+The Euchre refactor established a cleaner pattern in several places. Bring Sheepshead up to that pattern before adding game #3.
+
+- [ ] **P1.1 — N5** Split Sheepshead's `BiddingPanel.vue` into `PickingPanel`/`BuryingPanel`/`CallingPanel` under `games/sheepshead/bidding/`. (Resolves H4 fully.)
+- [ ] **P1.2 — N6** Create `useSheepsheadState()` mirroring `useEuchreState()`. Strip `picker`/`isPicker`/`partnerRevealedSeat`/`partner_revealed` handler from `useGameStore`. Move the partner-reveal setTimeout into a component-local `usePartnerRevealToast()` composable.
+- [ ] **P1.3 — N4** Move Sheepshead's trump table from `engine/sort.ts` to `games/sheepshead/sort.ts`. Update `sheepshead/GameTable.vue` to pass `:sort-fn`. Delete dead `trickWinnerIndex`.
+- [ ] **P1.4 — M8 remainder** Move Sheepshead's bidding actions (`pick`/`pass`/`bury`/`callAce`/`goAlone`) into `games/sheepshead/useSheepsheadBidding.ts` mirroring `useEuchreBidding.ts`.
+
+### Phase 2 — Eliminate GameTable duplication (blocking for new games)
+
+- [ ] **P2.1 — N1** Extract `<GameTableShell>` (or fold layout into `GameView.vue`). Both per-game GameTables shrink to ~40 lines that supply the bidding panel and any game-specific badge slots.
+- [ ] **P2.2 — L6** Drop the `gameState!` non-null assertions in both GameTables; have `GameView.vue` guard before mounting.
+
+### Phase 3 — Close the trait abstraction holes (blocking for game #3)
+
+- [ ] **P3.1 — N2/C4 remainder** Add bot dispatch to the `Game` trait (`bot_bid`/`bot_play` or `bot_strategy() -> &dyn BotStrategy`). Delete `games::bot_bid`/`bot_play` string-match dispatchers.
+- [ ] **P3.2 — N7** Move generic bot helpers to `engine/bot_helpers.rs`; delete `server/src/bot.rs`.
+- [ ] **P3.3 — C3** Introduce `Game::Meta` associated type (or typed wrapper). Replace ~30 `state.meta["…"]` accesses in `sheepshead/rules.rs`, `euchre/rules.rs`, both per-game bot modules, and `room.rs` with typed reads.
+- [ ] **P3.4 — H10** Fold `extra_piles` into the typed `Meta` (or a typed `PileKind` enum). Delete `"blind"` and `"kitty"` string literals.
+
+### Phase 4 — Server hygiene (was Phase 1 / 2 in the original plan)
+
+- [ ] **P4.1 — M2** Typed `BidResult.broadcast_payload` variants per game.
+- [ ] **P4.2 — M3** Promote `Game::deal` from `assert!`-on-bad-input to `Result<DealResult, GameError>`. Removes Euchre's three new asserts at the same time.
+- [ ] **P4.3 — M4** Introduce `engine::GameError` / `lobby::RoomError` via `thiserror` (already a dep).
+- [ ] **P4.4 — H1** Move "if fill_bots then start" / "default victory goal" / "auto-create room if missing" out of `ws::handler::route` into the lobby/room layer.
+- [ ] **P4.5 — M5** Remove file-level `#![allow(dead_code)]` from `room.rs`/`matchmaker.rs`; audit per-item allows.
+- [ ] **P4.6 — H9** `ts-rs`/`typeshare` for protocol types.
+
+### Phase 5 — Break up the Room god object (still big, still unchanged)
+
+- [ ] **P5.1 — C5** Split `Room` into `SeatManager` / `LobbyChat` / `RejoinTracker` / `GameSession` / `SessionScorer` / `BotDriver` / `Broadcaster`.
+- [ ] **P5.2 — H5** Consolidate mutexes (one `RwLock<RoomInner>`, or actor pattern).
+- [ ] **P5.3 — H7** Persistent bot task driven by `tokio::sync::Notify`; remove the per-action spawns.
+- [ ] **P5.4 — H8** `GameState::redacted_for(seat, game)`; `Game::visible_extra_piles(state, seat)`; collapse both call sites.
+
+### Phase 6 — Polish (unchanged from original)
+
+- [ ] **P6.1 — M9** Centralize magic timeouts (server `config.rs`, client `config.ts`).
+- [ ] **P6.2 — M1** Factor Sheepshead's schneider scoring helpers.
+- [ ] **P6.3 — L1** WebSocket reconnect with backoff.
+- [ ] **P6.4 — L2** CSS custom properties / design tokens. (Big leverage now that `<GameTableShell>` will have one CSS surface instead of two.)
+- [ ] **P6.5 — L3** Accessibility pass.
+- [ ] **P6.6 — L4-L10** small cleanups.
+- [ ] **P6.7 — L7** Test coverage for `Room` paths.
+
+### Resolution Summary
+
+| Finding | Original Status | Post-Merge Status |
+|---------|----------------|-------------------|
+| C1 | Critical | ✅ Resolved |
+| C2 | Critical | ⚠️ Mostly resolved (trickWinner index dead code remains) |
+| C3 | Critical | ❌ Open (worse — Euchre adds more untyped accesses) |
+| C4 | Critical | ⚠️ Half resolved (per-game modules; string dispatch remains, see N2) |
+| C5 | Critical | ❌ Open |
+| H1 | High | ❌ Open (now active Euchre bug, see N3) |
+| H2 | High | ❌ Open (asymmetric, see N6) |
+| H3 | High | ❌ Critical (duplicated, see N1) |
+| H4 | High | ⚠️ Half resolved (Euchre split, Sheepshead not, see N5) |
+| H5 | High | ❌ Open |
+| H6 | Medium-High | ❌ Open (active bug, see N3) |
+| H7 | High | ❌ Open |
+| H8 | Medium-High | ❌ Open |
+| H9 | High | ❌ Open |
+| H10 | Medium-High | ❌ Open (plural now) |
+| M1 | Medium | ❌ Open |
+| M2 | Medium | ❌ Open (plural now) |
+| M3 | Medium | ❌ Open (plural now) |
+| M4 | Medium | ❌ Open |
+| M5 | Medium | ❌ Open |
+| M6 | Medium | ❌ Open (now a potential Euchre bug, see N8) |
+| M7 | Medium | ⚠️ Partial (Euchre clean, Sheepshead not, see N4) |
+| M8 | Medium | ⚠️ Half resolved (Euchre clean, Sheepshead not) |
+| M9 | Medium | ❌ Open (plural now) |
+| M10 | Medium | ✅ Resolved |
+| N1 | — | 🆕 Critical (GameTable cloned) |
+| N2 | — | 🆕 High (string dispatch in games::mod) |
+| N3 | — | 🆕 High (active Euchre config bug) |
+| N4 | — | 🆕 Medium (Sheepshead trump still in engine/) |
+| N5 | — | 🆕 High (Sheepshead BiddingPanel not split) |
+| N6 | — | 🆕 High (Sheepshead state still in useGameStore) |
+| N7 | — | 🆕 Medium (two-layer bot dispatch shim) |
+| N8 | — | 🆕 Medium-High (Sheepshead point_value used for Euchre sluffs) |
+
+**One-sentence verdict:** The Euchre work made real progress on the critical findings (C1 ✅, C2 ⚠️, C4 ⚠️) but introduced cross-game asymmetry — Sheepshead is now the laggard for every pattern Euchre established correctly — and the GameTable was duplicated rather than decomposed, which is now the biggest barrier to adding a third game. The next sprint should be Phase 0 + Phase 1 + Phase 2 (active bug fixes + bring Sheepshead up to Euchre's structure + un-duplicate GameTable) before adding Hearts or Spades.
 
 ---
 
