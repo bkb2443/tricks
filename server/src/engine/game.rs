@@ -223,6 +223,15 @@ pub trait Game: Send + Sync {
         seat: usize,
         card: Card,
     ) -> Result<PlayResult, String>;
+
+    /// Names of extra piles that should be visible to `seat` in a snapshot.
+    /// Default: no piles are visible (i.e. the kitty/blind is hidden from everyone).
+    /// Games override this when a pile becomes visible to a given seat —
+    /// e.g. a Sheepshead variant that reveals the blind face-up after picking.
+    fn visible_extra_piles(&self, state: &GameState, seat: usize) -> Vec<&'static str> {
+        let _ = (state, seat);
+        Vec::new()
+    }
 }
 
 /// The logical suit category of a card (distinguishes trump from plain suits).
