@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::engine::game::Game;
 use crate::engine::{Card, Trick};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +75,26 @@ impl GameState {
             meta: serde_json::Value::Null,
             names: Vec::new(),
         }
+    }
+
+    /// Build a snapshot of this state as viewed by `seat`:
+    ///   * every hand other than `seat`'s is cleared
+    ///   * any extra pile not in `game.visible_extra_piles(self, seat)` is removed
+    ///
+    /// Single source of truth for snapshot redaction. The room sends the result to
+    /// one player as a `Snapshot` message; nothing else should re-implement either
+    /// the hand-clearing or the pile-filtering inline.
+    pub fn redacted_for(&self, seat: usize, game: &dyn Game) -> GameState {
+        let mut view = self.clone();
+        for (i, hand) in view.hands.iter_mut().enumerate() {
+            if i != seat {
+                hand.clear();
+            }
+        }
+        let visible = game.visible_extra_piles(self, seat);
+        view.extra_piles
+            .retain(|(name, _)| visible.contains(&name.as_str()));
+        view
     }
 
     /// Creates a GameState in Lobby phase (no hands dealt yet).
@@ -178,4 +199,121 @@ pub enum StateUpdate {
     /// Queue status for waiting players.
     QueueStatus { position: usize, waiting_since: u64 },
     Error { message: String },
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::game::{BidResult, DealResult, EffectiveSuit, PlayResult};
+    use crate::engine::Suit;
+    use crate::engine::card::Rank;
+
+    /// Minimal `Game` impl for testing the redactor. `visible_extra_piles` returns
+    /// whatever the test configured at construction time.
+    struct MockGame {
+        visible: Vec<&'static str>,
+    }
+
+    impl Game for MockGame {
+        fn name(&self) -> &'static str { "mock" }
+        fn valid_player_counts(&self) -> &'static [usize] { &[3] }
+        fn build_deck(&self) -> Vec<Card> { Vec::new() }
+        fn deal(&self, _: Vec<Card>, _: usize, _: usize) -> DealResult {
+            DealResult { hands: Vec::new(), extra_piles: Vec::new(), initial_meta: serde_json::Value::Null }
+        }
+        fn trump_rank(&self, _: Card, _: &GameState) -> Option<u8> { None }
+        fn plain_suit_rank(&self, _: Card) -> u8 { 0 }
+        fn effective_suit(&self, c: Card, _: &GameState) -> EffectiveSuit {
+            EffectiveSuit::Plain(c.suit)
+        }
+        fn legal_plays(&self, hand: &[Card], _: &Trick, _: &GameState) -> Vec<Card> {
+            hand.to_vec()
+        }
+        fn card_points(&self, _: Card) -> u8 { 0 }
+        fn trick_winner(&self, _: &Trick, _: &GameState) -> usize { 0 }
+        fn score_game(&self, _: &[Vec<Trick>], _: &GameState) -> Vec<i32> { Vec::new() }
+        fn apply_bid(&self, _: &mut GameState, _: usize, _: &serde_json::Value) -> Result<BidResult, String> {
+            Err("no bidding".into())
+        }
+        fn apply_play(&self, _: &mut GameState, _: usize, _: Card) -> Result<PlayResult, String> {
+            Ok(PlayResult::Continuing)
+        }
+        fn visible_extra_piles(&self, _: &GameState, _: usize) -> Vec<&'static str> {
+            self.visible.clone()
+        }
+    }
+
+    fn populated_state() -> GameState {
+        let mut s = GameState::new(Uuid::nil(), "mock".into(), 3, 0);
+        let c = Card::new(Suit::Clubs, Rank::Ace);
+        s.hands = vec![vec![c, c], vec![c], vec![c, c, c]];
+        s.extra_piles = vec![
+            ("blind".to_string(), vec![c]),
+            ("kitty".to_string(), vec![c, c]),
+        ];
+        s
+    }
+
+    #[test]
+    fn redacted_for_clears_other_hands() {
+        let state = populated_state();
+        let game = MockGame { visible: vec![] };
+        let view = state.redacted_for(1, &game);
+        assert!(view.hands[0].is_empty());
+        assert_eq!(view.hands[1].len(), 1, "viewer's own hand is preserved");
+        assert!(view.hands[2].is_empty());
+    }
+
+    #[test]
+    fn redacted_for_hides_extra_piles_by_default() {
+        let state = populated_state();
+        let game = MockGame { visible: vec![] };
+        let view = state.redacted_for(0, &game);
+        assert!(view.extra_piles.is_empty(), "default trait impl hides all piles");
+    }
+
+    #[test]
+    fn redacted_for_keeps_piles_listed_as_visible() {
+        let state = populated_state();
+        let game = MockGame { visible: vec!["blind"] };
+        let view = state.redacted_for(0, &game);
+        assert_eq!(view.extra_piles.len(), 1);
+        assert_eq!(view.extra_piles[0].0, "blind");
+    }
+
+    #[test]
+    fn redacted_for_keeps_multiple_visible_piles_and_drops_others() {
+        let state = populated_state();
+        let game = MockGame { visible: vec!["blind", "kitty", "graveyard"] };
+        let view = state.redacted_for(2, &game);
+        let names: Vec<&str> = view.extra_piles.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["blind", "kitty"], "only piles that exist AND are visible survive");
+    }
+
+    #[test]
+    fn redacted_for_does_not_mutate_source() {
+        let state = populated_state();
+        let game = MockGame { visible: vec![] };
+        let _ = state.redacted_for(0, &game);
+        assert_eq!(state.hands[1].len(), 1, "source hands unchanged");
+        assert_eq!(state.hands[2].len(), 3, "source hands unchanged");
+        assert_eq!(state.extra_piles.len(), 2, "source extra_piles unchanged");
+    }
+
+    #[test]
+    fn redacted_for_preserves_meta_and_other_fields() {
+        let mut state = populated_state();
+        state.meta = serde_json::json!({"picker": 1, "called_suit": "clubs"});
+        state.current_player = 2;
+        state.dealer = 1;
+        let game = MockGame { visible: vec![] };
+        let view = state.redacted_for(0, &game);
+        assert_eq!(view.meta, state.meta, "meta is not redacted by this helper");
+        assert_eq!(view.current_player, 2);
+        assert_eq!(view.dealer, 1);
+    }
 }

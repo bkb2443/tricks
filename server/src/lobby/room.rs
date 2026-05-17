@@ -173,10 +173,11 @@ impl Room {
             }
         }
 
-        // Send the joiner a lobby snapshot
+        // Send the joiner a lobby snapshot (redacted, though in Lobby phase
+        // there is nothing to hide — go through the helper for consistency).
         let snapshot = {
             let guard = self.state.lock().unwrap();
-            guard.as_ref().cloned()
+            guard.as_ref().map(|s| s.redacted_for(seat, self.game.as_ref()))
         };
         if let Some(state) = snapshot {
             let _ = tx.try_send(StateUpdate::Snapshot { state });
@@ -377,14 +378,7 @@ impl Room {
 
         let snapshot = {
             let guard = self.state.lock().unwrap();
-            guard.as_ref().map(|s| {
-                let mut view = s.clone();
-                for (i, hand) in view.hands.iter_mut().enumerate() {
-                    if i != seat { hand.clear(); }
-                }
-                view.extra_piles.clear();
-                view
-            })
+            guard.as_ref().map(|s| s.redacted_for(seat, self.game.as_ref()))
         };
         if let Some(state) = snapshot {
             let _ = tx.try_send(StateUpdate::Snapshot { state });
@@ -601,11 +595,7 @@ impl Room {
             let seats = self.seats.lock().unwrap();
             for (seat, seat_state) in seats.iter().enumerate() {
                 let Some(tx) = seat_state.tx() else { continue };
-                let mut view = state.clone();
-                for (i, hand) in view.hands.iter_mut().enumerate() {
-                    if i != seat { hand.clear(); }
-                }
-                view.extra_piles.clear();
+                let view = state.redacted_for(seat, self.game.as_ref());
                 let _ = tx.try_send(StateUpdate::Snapshot { state: view });
             }
         }
