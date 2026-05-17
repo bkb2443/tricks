@@ -407,7 +407,8 @@ impl Sheepshead {
                 state.meta["sub_phase"] = serde_json::json!("burying");
                 // current_player stays as `seat` — they must now bury 2 cards
 
-                Ok(BidResult { phase_complete: false, hand_updated_seat: Some(seat), broadcast_payload: None })
+                let payload = serde_json::json!({ "picker": seat, "sub_phase": "burying" });
+                Ok(BidResult { phase_complete: false, hand_updated_seat: Some(seat), broadcast_payload: Some(payload) })
             }
 
             "pass" => {
