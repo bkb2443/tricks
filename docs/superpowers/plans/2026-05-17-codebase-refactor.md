@@ -204,7 +204,7 @@ The plan below sequences fixes by blast radius. **Phase 1 (quick wins / pure cle
 
 ### H8. Snapshot-redaction logic duplicated
 
-- **Status:** ❌ **Still open and now masks game-specific visibility rules.** Both call sites (`room.rs:381-388` rejoin and `room.rs:596-608` start_next_hand) still unconditionally `view.extra_piles.clear()`. Euchre's `turned_up_card` lives in `meta` so it survives the redaction, but Euchre's `kitty` is an `extra_pile` so it's always wiped — which happens to be correct, but only by luck. If Sheepshead ever wants to show the blind face-up post-pick (a common variant), the redaction will silently hide it. The room has no game-trait hook to ask "which piles are visible to seat X right now?".
+- **Status:** ✅ **Resolved.** `GameState::redacted_for(seat, game)` is now the single helper used by all three Snapshot call sites (`room.rs::join_lobby`, `room.rs::on_rejoin`, `room.rs::start_next_hand`). The `Game` trait gained `visible_extra_piles(&self, state, seat) -> Vec<&'static str>` with a default returning empty (i.e. all piles hidden), matching today's behavior for both Sheepshead and Euchre. Games can now opt piles back in per seat — e.g., a Sheepshead variant that reveals the blind post-pick would override `visible_extra_piles` to return `vec!["blind"]` when `state.meta["picker"]` matches `seat`. Six unit tests in `engine/state.rs` cover the helper.
 - **Severity:** Medium-High (duplication, now also a latent abstraction hole)
 - **Location:** `server/src/lobby/room.rs:381-388` (rejoin), `server/src/lobby/room.rs:596-602` (start_next_hand) — both clone state, clear other hands, clear extra_piles.
 - **Why it matters:** Redaction rules are scattered. When game-specific rules decide some piles ARE visible (e.g., Sheepshead post-pick reveal of the blind to all, if that became a feature), it'll be missed in one of the two places.
@@ -557,7 +557,7 @@ The Euchre refactor established a cleaner pattern in several places. Bring Sheep
 - [ ] **P5.1 — C5** Split `Room` into `SeatManager` / `LobbyChat` / `RejoinTracker` / `GameSession` / `SessionScorer` / `BotDriver` / `Broadcaster`.
 - [ ] **P5.2 — H5** Consolidate mutexes (one `RwLock<RoomInner>`, or actor pattern).
 - [ ] **P5.3 — H7** Persistent bot task driven by `tokio::sync::Notify`; remove the per-action spawns.
-- [ ] **P5.4 — H8** `GameState::redacted_for(seat, game)`; `Game::visible_extra_piles(state, seat)`; collapse both call sites.
+- [x] **P5.4 — H8** `GameState::redacted_for(seat, game)`; `Game::visible_extra_piles(state, seat)`; collapse both call sites. (Resolved in this branch; was Phase 5 but landed early as it had no dependencies on the larger Room split.)
 
 ### Phase 6 — Polish (unchanged from original)
 
@@ -585,7 +585,7 @@ The Euchre refactor established a cleaner pattern in several places. Bring Sheep
 | H5 | High | ❌ Open |
 | H6 | Medium-High | ❌ Open (active bug, see N3) |
 | H7 | High | ❌ Open |
-| H8 | Medium-High | ❌ Open |
+| H8 | Medium-High | ✅ Resolved |
 | H9 | High | ❌ Open |
 | H10 | Medium-High | ❌ Open (plural now) |
 | M1 | Medium | ❌ Open |
