@@ -12,7 +12,11 @@ const { pick, pass, bury, callAce, goAlone } = useGame()
 
 // Two sub-phases: picking (anyone can pick/pass) and burying (picker discards 2)
 const isPickingPhase = computed(() => store.picker === null)
-const isBuryPhase    = computed(() => store.picker !== null && store.phase === 'bidding')
+const isBuryPhase    = computed(() =>
+  store.picker !== null &&
+  store.phase === 'bidding' &&
+  store.gameState?.meta?.sub_phase === 'burying'
+)
 
 const isMyPickTurn = computed(() => isPickingPhase.value && store.isMyTurn)
 const isMyBuryTurn = computed(() => isBuryPhase.value && store.isPicker)
