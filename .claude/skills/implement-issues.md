@@ -30,6 +30,8 @@ gh issue list \
 
 Set `issues_completed=0`.
 
+If the issue list is empty, go directly to the End-of-Run Report.
+
 ### Per-Issue Loop
 
 **Before starting each issue, check all stopping conditions:**
@@ -109,15 +111,19 @@ Pass each agent:
 
 Prompt: "Run all test suites and report results for the changes made to implement issue #[number]: [title]. Report per the qa agent output contract."
 
+**QA passes** if all 4 suites show PASS. **QA fails** if any suite shows FAIL.
+
 ---
 
 **Step 7 — Dispatch reviewer agent**
 
 Prompt: "Review the changes made to implement issue #[number]: [title]. Run `git diff main...HEAD` and report findings per the reviewer agent output contract."
 
+**Review passes** if no `critical` or `major` findings. Minor findings do not block. If the reviewer reports only minor findings or none, treat as pass.
+
 ---
 
-**Step 8a — On pass (QA + review both approve)**
+**Step 8a — On pass (QA passes AND review passes)**
 
 ```bash
 git push -u origin issue-[number]-[slug]
@@ -131,16 +137,14 @@ Implemented via implement-issues routine.
 EOF
 )"
 
-gh issue edit [number] \
-  --remove-label in-progress \
-  --remove-label ready
+gh issue edit [number] --remove-label ready --remove-label in-progress
 ```
 
 Increment `issues_completed`.
 
 ---
 
-**Step 8b — On fail (QA or review found blocking issues)**
+**Step 8b — On fail (QA fails OR review has critical/major findings)**
 
 ```bash
 git push -u origin issue-[number]-[slug]
@@ -155,7 +159,7 @@ Attempted by implement-issues routine. Draft — see failures below.
 
 ## Failures
 
-[document exact QA failures and/or reviewer findings]
+[Paste the full verbatim output from the QA agent and/or reviewer agent — do not paraphrase or summarize]
 EOF
 )"
 
