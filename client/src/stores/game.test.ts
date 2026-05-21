@@ -231,6 +231,27 @@ describe('game store', () => {
     expect(store.isMyTurn).toBe(true)
   })
 
+  // Server must broadcast picker/sub_phase in the pick payload so the client
+  // transitions from picking sub-phase to burying sub-phase. Without this, meta.picker
+  // stays null and the bury UI (isBuryPhase) never renders — user cannot proceed after picking.
+  it('bid_placed for pick sets meta.picker so bury phase becomes active', () => {
+    const store = useGameStore()
+    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
+    store.handleUpdate({ type: 'snapshot', state: makeState({ current_player: 2 }) })
+
+    // Server broadcasts { picker, sub_phase } as the payload (not raw { action: "pick" })
+    store.handleUpdate({
+      type: 'bid_placed',
+      player: 2,
+      value: { picker: 2, sub_phase: 'burying' },
+      current_player: 2,
+    })
+
+    expect(store.picker).toBe(2)
+    expect(store.isPicker).toBe(true)
+    expect(store.gameState?.meta?.sub_phase).toBe('burying')
+  })
+
   it('bid_placed for bury advances current_player to first trick leader', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
