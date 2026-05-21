@@ -24,9 +24,9 @@ All game-specific behavior is expressed through the `Game` trait, not around it.
 
 ## The Game Trait
 
-The `Game` trait encapsulates all game-specific behavior:
+The `Game` trait encapsulates all game-specific behavior. Read `server/src/engine/game.rs` for the complete method signatures before implementing. Key behavioral categories:
 - **Deck configuration** — which cards exist (e.g. Sheepshead uses 32 cards: 7–A)
-- **Trump determination** — static (Sheepshead: all Jacks + all Diamonds) or dynamic (led suit)
+- **Trump determination** — static (Sheepshead: all Queens + all Jacks + all Diamonds) or dynamic (led suit)
 - **Card rank ordering** — within trump and within plain suits (varies per game)
 - **Player count** — valid counts and seating rules
 - **Dealing rules** — cards per player, kitty/blind, dealing order
@@ -38,8 +38,8 @@ The `Game` trait encapsulates all game-specific behavior:
 
 ### Sheepshead (current implementation)
 - 5 players; 32-card deck (7–A); one player picks the blind (2 cards), plays against the other 4
-- Trump order (high→low): ♣J ♠J ♥J ♦J A♦ 10♦ K♦ Q♦ 9♦ 8♦ 7♦
-- Non-trump suit order (high→low): A 10 K 9 8 7 (Queens and Jacks are always trump regardless of suit)
+- Trump order (high→low): ♣Q ♠Q ♥Q ♦Q ♣J ♠J ♥J ♦J A♦ 10♦ K♦ 9♦ 8♦ 7♦
+- Non-trump suit order (high→low): A 10 K 9 8 7 (all Queens and Jacks are always trump regardless of suit; ♦Q and ♦J appear in trump group, not plain-diamond group)
 - Points: Aces=11, 10s=10, Kings=4, Queens=3, Jacks=2 (total 120 points)
 - Picker needs >60 points to win; exact 60 is a loss for the picker
 
@@ -58,8 +58,9 @@ Bot decisions in `bot.rs` use a `BotState` struct derived fresh from `GameState`
 ## Coding Standards
 
 - Server rejects illegal moves with typed errors — never silently coerce or fall back
-- `thiserror`-derived error enums, not `Result<_, String>`
+- `thiserror`-derived error enums, not `Result<_, String>`. Existing code may still use `String` errors at trait boundaries — migrate when you touch those methods.
 - Every game rule change needs a test; no behavior change without a regression test
+- New game implementations must test: deck size, dealing invariants, legal-play enforcement, trick-winner correctness, and scoring across all branches (regular win, schneider, leaster, partner cases where applicable)
 
 ## Commands
 
