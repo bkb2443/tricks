@@ -44,9 +44,9 @@ Revise until approved.
 
 **Step 5 — Assess implementability:**
 
-Before creating the issue, ask yourself: "Can this spec be fully implemented without asking a human any clarifying questions? Are requirements specific? Are acceptance criteria binary? Is scope unambiguous?"
+**You decide** — not the user. Read the approved spec and ask yourself: "Could any requirement or acceptance criterion be interpreted two different ways? Is there any decision an implementer would need to make that isn't answered by the spec?" If any answer is yes, the issue is not ready.
 
-**If YES** — create with `ready` label:
+**If YES (spec is complete and unambiguous)** — create with `ready` label:
 ```bash
 gh issue create \
   --title "[feature title]" \
@@ -54,16 +54,19 @@ gh issue create \
   --label "ready"
 ```
 
-**If NO** — create without `ready`, add a comment:
+**If NO (spec has gaps)** — create without `ready`, add a comment:
 ```bash
 gh issue create \
   --title "[feature title]" \
   --body "[full spec body]"
 ```
-Then comment on the created issue:
+Then comment on the created issue listing each gap specifically:
 ```bash
 gh issue comment [issue-number] \
-  --body "Not labeled ready — needs clarification before implementation: [list exactly what's ambiguous or missing]"
+  --body "Not labeled ready — needs clarification before implementation can begin:
+
+- [Gap 1: e.g. 'Requirement 2 says \"show an error\" but doesn't specify what the error message should say']
+- [Gap 2: e.g. 'Acceptance criteria 3 is ambiguous: does \"player cannot play\" mean the card is greyed out, or removed from hand?']"
 ```
 
 ## Rules
