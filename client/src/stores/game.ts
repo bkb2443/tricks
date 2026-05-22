@@ -14,6 +14,7 @@ export const useGameStore = defineStore('game', () => {
   const sessionWinner = ref<number | null>(null)
   const completedTrick = ref<Trick | null>(null)
   const currentTrickWinner = ref<number>(-1)
+  const showCatchUp = ref<boolean>(false)
   const partnerRevealedSeat = ref<number | null>(null)
   const seats          = ref<SeatInfo[]>([])
   const lobbyChat      = ref<Array<{ from: string; text: string; timestamp: number }>>([])
@@ -64,10 +65,19 @@ export const useGameStore = defineStore('game', () => {
         break
 
       case 'snapshot':
+        // Detect mid-game rejoin: already have state, new snapshot arrives during active play
+        if (gameState.value !== null && gameState.value.phase !== 'lobby' &&
+            update.state.phase !== 'lobby' && update.state.phase !== 'intermission') {
+          showCatchUp.value = true
+        }
         gameState.value = update.state
         // The snapshot only populates our own hand slot; sync myHand from it.
         myHand.value = update.state.hands[seat.value!] ?? []
         currentTrickWinner.value = -1
+        // Sync session scores from snapshot (server now includes them)
+        if (update.state.session_scores?.length) {
+          sessionScores.value = update.state.session_scores
+        }
         break
 
       case 'hand_updated':
@@ -179,6 +189,10 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function dismissCatchUp(): void {
+    showCatchUp.value = false
+  }
+
   function reset(): void {
     roomId.value        = null
     seat.value          = null
@@ -195,16 +209,17 @@ export const useGameStore = defineStore('game', () => {
     lobbyChat.value   = []
     queueStatus.value = null
     roomCode.value    = null
+    showCatchUp.value = false
     if (pauseTimer !== null) { clearTimeout(pauseTimer); pauseTimer = null }
   }
 
   return {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
-    partnerRevealedSeat, seats, lobbyChat, queueStatus, roomCode,
+    partnerRevealedSeat, seats, lobbyChat, queueStatus, roomCode, showCatchUp,
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName, isLobby,
     // actions
-    handleUpdate, reset,
+    handleUpdate, reset, dismissCatchUp,
   }
 })

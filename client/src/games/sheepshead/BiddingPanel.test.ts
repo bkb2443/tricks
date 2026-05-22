@@ -33,13 +33,6 @@ describe('BiddingPanel sub-phase rendering', () => {
     setActivePinia(createPinia())
   })
 
-  function mountWithState(meta: object, seat = 1, currentPlayer = 1) {
-    const store = useGameStore()
-    store.handleUpdate({ type: 'joined_room', room_id: 'r', seat, room_code: 'TEST01' })
-    store.handleUpdate({ type: 'snapshot', state: makeState(meta, currentPlayer) })
-    return mount(BiddingPanel, { global: { plugins: [createPinia()] } })
-  }
-
   it('picking sub-phase shows pick/pass for the active player', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
