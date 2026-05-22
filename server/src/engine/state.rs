@@ -11,6 +11,8 @@ pub enum GamePhase {
     Bidding,
     Playing,
     Scoring,
+    /// Between hands: waiting for the next dealer to start the next hand.
+    Intermission,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +41,9 @@ pub struct GameState {
     pub current_trick: Option<Trick>,
     pub completed_tricks: Vec<Trick>,
     pub scores: Vec<i32>,
+    /// Cumulative per-player scores across all hands played so far in this session.
+    #[serde(default)]
+    pub session_scores: Vec<i32>,
     /// Game-specific metadata (e.g. who picked the blind in Sheepshead, called trump in
     /// Euchre). Serialised as opaque JSON so the engine never needs to know the shape.
     pub meta: serde_json::Value,
@@ -72,6 +77,7 @@ impl GameState {
             current_trick: None,
             completed_tricks: Vec::new(),
             scores: vec![0; player_count],
+            session_scores: vec![0; player_count],
             meta: serde_json::Value::Null,
             names: Vec::new(),
         }
@@ -118,6 +124,7 @@ impl GameState {
             current_trick: None,
             completed_tricks: Vec::new(),
             scores: vec![0; player_count],
+            session_scores: vec![0; player_count],
             meta: serde_json::json!({
                 "host_seat": null,
                 "countdown_ends_at": null,
@@ -159,6 +166,8 @@ pub enum ClientMessage {
     JoinQueue,
     /// Leave the public matchmaking queue.
     LeaveQueue,
+    /// Next dealer advances from Intermission to start the next hand.
+    StartNextHand,
 }
 
 // ---------------------------------------------------------------------------

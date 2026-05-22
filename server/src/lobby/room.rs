@@ -21,7 +21,10 @@ enum SeatState {
         ws_id: Uuid,
         tx: mpsc::Sender<StateUpdate>,
     },
-    Bot,
+    /// A bot seat. `original_name` is `Some` when the bot is substituting for a
+    /// disconnected human (preserving the name for potential rejoin); `None` for
+    /// seats that were always bots.
+    Bot { original_name: Option<String> },
     Disconnected {
         name: String,
         rejoin_deadline: std::time::Instant,
@@ -33,12 +36,13 @@ enum SeatState {
 impl SeatState {
     fn is_empty(&self) -> bool { matches!(self, SeatState::Empty) }
     fn is_human(&self) -> bool { matches!(self, SeatState::Human { .. }) }
-    fn is_bot(&self) -> bool { matches!(self, SeatState::Bot) }
+    fn is_bot(&self) -> bool { matches!(self, SeatState::Bot { .. }) }
 
     fn name(&self) -> Option<&str> {
         match self {
             SeatState::Human { name, .. } => Some(name),
             SeatState::Disconnected { name, .. } => Some(name),
+            SeatState::Bot { original_name: Some(name) } => Some(name.as_str()),
             _ => None,
         }
     }
@@ -61,7 +65,7 @@ impl SeatState {
         let (state_str, name) = match self {
             SeatState::Empty => ("empty", None),
             SeatState::Human { name, .. } => ("human", Some(name.clone())),
-            SeatState::Bot => ("bot", None),
+            SeatState::Bot { original_name } => ("bot", original_name.clone()),
             SeatState::Disconnected { name, .. } => ("disconnected", Some(name.clone())),
         };
         SeatInfo { seat, state: state_str.into(), name }
@@ -267,7 +271,7 @@ impl Room {
         {
             let mut seats = self.seats.lock().unwrap();
             for s in seats.iter_mut() {
-                if s.is_empty() { *s = SeatState::Bot; }
+                if s.is_empty() { *s = SeatState::Bot { original_name: None }; }
             }
         }
         self.start_game_inner();
@@ -281,12 +285,15 @@ impl Room {
         {
             let mut seats = self.seats.lock().unwrap();
             for s in seats.iter_mut() {
-                if s.is_empty() { *s = SeatState::Bot; }
+                if s.is_empty() { *s = SeatState::Bot { original_name: None }; }
             }
         }
     }
 
     fn start_game_inner(&self) {
+        // Reset match state so a restarted game starts clean.
+        *self.session_scores.lock().unwrap() = vec![0; self.player_count];
+        *self.hands_played.lock().unwrap() = 0;
         let dealer = {
             let mut rng = rand::thread_rng();
             rand::Rng::gen_range(&mut rng, 0..self.player_count)
@@ -347,7 +354,7 @@ impl Room {
             {
                 let mut seats = self.seats.lock().unwrap();
                 if let Some(s) = seats.get_mut(seat) {
-                    *s = SeatState::Bot;
+                    *s = SeatState::Bot { original_name: Some(expected_name.to_string()) };
                 }
             }
             self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
@@ -364,8 +371,16 @@ impl Room {
     ) -> bool {
         let can_rejoin = {
             let seats = self.seats.lock().unwrap();
-            matches!(seats.get(seat), Some(SeatState::Disconnected { name: n, rejoin_deadline, .. })
-                if n == name && *rejoin_deadline > std::time::Instant::now())
+            // Allow rejoin if the seat is Disconnected within the deadline, or if a
+            // bot has taken over the seat (original_name matches) — this handles the
+            // case where the rejoin timer expired mid-hand and a bot substitute took over.
+            let seat_state = seats.get(seat);
+            let disconnected_ok = matches!(seat_state,
+                Some(SeatState::Disconnected { name: n, rejoin_deadline, .. })
+                if n == name && *rejoin_deadline > std::time::Instant::now());
+            let bot_sub_ok = matches!(seat_state,
+                Some(SeatState::Bot { original_name: Some(n) }) if n == name);
+            disconnected_ok || bot_sub_ok
         };
         if !can_rejoin { return false; }
 
@@ -489,7 +504,7 @@ impl Room {
                 };
                 let mut hp = self.hands_played.lock().unwrap();
                 *hp += 1;
-                let hands_done = *hp;
+                let hands_done = *hp as usize;
                 drop(hp);
 
                 self.broadcast(StateUpdate::HandComplete {
@@ -497,8 +512,24 @@ impl Room {
                     session_scores: session_scores.clone(),
                 });
 
-                if (*self.max_hands.lock().unwrap()).is_some_and(|max| hands_done >= max) {
-                    let winner = self.session_winner(&session_scores).unwrap_or(0);
+                // Determine if the match is over (hand-count limit or score-based).
+                let match_over = {
+                    let max_h = *self.max_hands.lock().unwrap();
+                    let default_max = self.game.default_max_hands();
+                    let hand_limit = max_h.or(default_max);
+                    let hands_limit_reached = hand_limit.is_some_and(|max| hands_done >= max as usize);
+                    hands_limit_reached || self.game.match_over(&session_scores, hands_done)
+                };
+
+                if match_over {
+                    let winner = self.game.match_winner(&session_scores).unwrap_or_else(|| {
+                        session_scores
+                            .iter()
+                            .enumerate()
+                            .max_by_key(|&(_, &s)| s)
+                            .map(|(i, _)| i)
+                            .unwrap_or(0)
+                    });
                     self.broadcast(StateUpdate::SessionOver {
                         winner,
                         final_scores: session_scores,
@@ -506,11 +537,59 @@ impl Room {
                     return Ok(());
                 }
 
-                if let Some(winner) = self.session_winner(&session_scores) {
-                    self.broadcast(StateUpdate::SessionOver { winner, final_scores: session_scores });
+                // Match continues — enter Intermission; next dealer triggers the next hand.
+                {
+                    let mut guard = self.state.lock().unwrap();
+                    if let Some(ref mut state) = *guard {
+                        state.phase = GamePhase::Intermission;
+                    }
                 }
+                self.broadcast(StateUpdate::PhaseChanged { phase: GamePhase::Intermission });
             }
         }
+        Ok(())
+    }
+
+    /// Called by the next dealer (via `StartNextHand` WebSocket message) to advance
+    /// from `Intermission` into the next hand. In all-bot rooms, `drive_bots` calls
+    /// this automatically; in rooms with humans, only the next dealer may trigger it.
+    pub fn start_next_hand_dealer(&self, requesting_seat: usize) -> Result<(), String> {
+        let phase = {
+            let guard = self.state.lock().unwrap();
+            guard.as_ref().map(|s| s.phase.clone())
+        };
+        if phase != Some(GamePhase::Intermission) {
+            return Err("not in intermission".into());
+        }
+        let current_dealer = {
+            let guard = self.state.lock().unwrap();
+            guard.as_ref().map(|s| s.dealer).unwrap_or(0)
+        };
+        let next_dealer = (current_dealer + 1) % self.player_count;
+
+        // In a room with at least one human: only the next dealer may advance.
+        // If the next-dealer seat is currently a bot (player disconnected / substituted),
+        // any human may trigger so the game can continue.
+        let (all_bots, next_dealer_is_human) = {
+            let seats = self.seats.lock().unwrap();
+            let all_bots = seats.iter().all(|s| s.is_bot());
+            let nd_human = seats.get(next_dealer).map(|s| s.is_human()).unwrap_or(false);
+            (all_bots, nd_human)
+        };
+        if !all_bots {
+            let requester_is_human = {
+                let seats = self.seats.lock().unwrap();
+                seats.get(requesting_seat).map(|s| s.is_human()).unwrap_or(false)
+            };
+            if next_dealer_is_human && requesting_seat != next_dealer {
+                return Err("only the next dealer can start the next hand".into());
+            }
+            if !next_dealer_is_human && !requester_is_human {
+                return Err("only a human player can start the next hand".into());
+            }
+        }
+
+        self.start_next_hand(next_dealer);
         Ok(())
     }
 
@@ -534,28 +613,31 @@ impl Room {
         let _guard = Guard(&self.bots_running);
 
         loop {
-            let (seat, phase) = {
+            let (seat, phase, dealer) = {
                 let guard = self.state.lock().unwrap();
                 let Some(state) = guard.as_ref() else { break };
-                (state.current_player, state.phase.clone())
+                (state.current_player, state.phase.clone(), state.dealer)
             };
 
-            if phase == GamePhase::Scoring {
-                let session_scores = self.session_scores.lock().unwrap().clone();
-                let hands_done = *self.hands_played.lock().unwrap();
-                let session_over = (*self.max_hands.lock().unwrap()).is_some_and(|max| hands_done >= max)
-                    || self.session_winner(&session_scores).is_some();
-                if session_over { break; }
-                tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
-                let next_dealer = {
-                    let guard = self.state.lock().unwrap();
-                    guard.as_ref().map(|s| (s.dealer + 1) % self.player_count).unwrap_or(0)
+            // After play_card sets Scoring, it immediately transitions to Intermission
+            // or SessionOver. Break here so the next drive_bots invocation picks up the
+            // correct phase.
+            if phase == GamePhase::Scoring { break; }
+
+            if phase == GamePhase::Lobby { break; }
+
+            // In Intermission, bots auto-advance only when there are no humans present.
+            if phase == GamePhase::Intermission {
+                let has_human = {
+                    let seats = self.seats.lock().unwrap();
+                    seats.iter().any(|s| s.is_human())
                 };
+                if has_human { break; } // wait for the human next-dealer to click
+                tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
+                let next_dealer = (dealer + 1) % self.player_count;
                 self.start_next_hand(next_dealer);
                 continue;
             }
-
-            if phase == GamePhase::Lobby { break; }
 
             let is_bot = {
                 let seats = self.seats.lock().unwrap();
@@ -588,9 +670,24 @@ impl Room {
 
     fn start_next_hand(&self, dealer: usize) {
         let mut rng = rand::thread_rng();
+
+        // Fill any disconnected seats with bot substitutes so the hand can proceed.
+        {
+            let mut seats = self.seats.lock().unwrap();
+            for s in seats.iter_mut() {
+                if let SeatState::Disconnected { name, .. } = s {
+                    let name = name.clone();
+                    *s = SeatState::Bot { original_name: Some(name) };
+                }
+            }
+        }
+
+        let session_scores_snapshot = self.session_scores.lock().unwrap().clone();
+
         let mut state = GameState::new(self.id, self.game_name.clone(), self.player_count, dealer);
         deal_game(self.game.as_ref(), &mut state, &mut rng);
         state.names = self.compute_names();
+        state.session_scores = session_scores_snapshot;
         {
             let seats = self.seats.lock().unwrap();
             for (seat, seat_state) in seats.iter().enumerate() {
@@ -603,22 +700,14 @@ impl Room {
         tracing::info!(room_code = %self.room_code, dealer, "hand started");
     }
 
-    fn session_winner(&self, session_scores: &[i32]) -> Option<usize> {
-        let goal = self.victory_goal;
-        let mut reached: Vec<usize> = session_scores.iter().enumerate()
-            .filter(|&(_, &s)| s >= goal).map(|(i, _)| i).collect();
-        if reached.is_empty() { return None; }
-        reached.sort_by(|&a, &b| session_scores[b].cmp(&session_scores[a]));
-        Some(reached[0])
-    }
-
     fn compute_names(&self) -> Vec<String> {
         let seats = self.seats.lock().unwrap();
         let mut bot_counter = 0usize;
         seats.iter().map(|s| match s {
             SeatState::Human { name, .. } => name.clone(),
             SeatState::Disconnected { name, .. } => name.clone(),
-            SeatState::Bot => { bot_counter += 1; format!("Bot {bot_counter}") }
+            SeatState::Bot { original_name: Some(name) } => name.clone(),
+            SeatState::Bot { original_name: None } => { bot_counter += 1; format!("Bot {bot_counter}") }
             SeatState::Empty => "Empty".into(),
         }).collect()
     }

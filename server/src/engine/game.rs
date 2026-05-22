@@ -232,6 +232,29 @@ pub trait Game: Send + Sync {
         let _ = (state, seat);
         Vec::new()
     }
+
+    /// Default maximum number of hands per match. `None` means no hand-count limit
+    /// (termination is score-based via `match_over`).
+    fn default_max_hands(&self) -> Option<u32> {
+        None
+    }
+
+    /// Returns `true` when the match should end based on cumulative scores or hand
+    /// count. Called after every hand completes. For score-based termination (e.g.
+    /// Euchre reaching 10 points). The hand-count limit is checked separately by
+    /// the room — this method is for score-based termination only.
+    fn match_over(&self, cumulative_scores: &[i32], hands_played: usize) -> bool {
+        let _ = (cumulative_scores, hands_played);
+        false
+    }
+
+    /// Returns the winning seat index when the match is over. Called only when
+    /// `match_over` returned `true` or the hand limit was reached. Returns `None`
+    /// if no clear winner can be determined (room falls back to highest score).
+    fn match_winner(&self, cumulative_scores: &[i32]) -> Option<usize> {
+        let _ = cumulative_scores;
+        None
+    }
 }
 
 /// The logical suit category of a card (distinguishes trump from plain suits).

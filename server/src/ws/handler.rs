@@ -238,6 +238,20 @@ fn route(
             }
         }
 
+        // ── Match-play ────────────────────────────────────────────────────────
+        ClientMessage::StartNextHand => {
+            let c = ctx.as_ref()?;
+            let seat = c.seat;
+            match c.room.start_next_hand_dealer(seat) {
+                Ok(()) => {
+                    let room_arc = Arc::clone(&c.room);
+                    tokio::spawn(async move { room_arc.drive_bots().await });
+                    None
+                }
+                Err(msg) => Some(StateUpdate::Error { message: msg }),
+            }
+        }
+
         // ── Matchmaking ───────────────────────────────────────────────────────
         ClientMessage::JoinQueue => {
             let name = ctx.as_ref()
