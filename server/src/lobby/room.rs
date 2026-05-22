@@ -291,6 +291,9 @@ impl Room {
     }
 
     fn start_game_inner(&self) {
+        // Reset match state so a restarted game starts clean.
+        *self.session_scores.lock().unwrap() = vec![0; self.player_count];
+        *self.hands_played.lock().unwrap() = 0;
         let dealer = {
             let mut rng = rand::thread_rng();
             rand::Rng::gen_range(&mut rng, 0..self.player_count)
@@ -564,13 +567,26 @@ impl Room {
         };
         let next_dealer = (current_dealer + 1) % self.player_count;
 
-        // In a room with at least one human, only the next dealer may advance.
-        let all_bots = {
+        // In a room with at least one human: only the next dealer may advance.
+        // If the next-dealer seat is currently a bot (player disconnected / substituted),
+        // any human may trigger so the game can continue.
+        let (all_bots, next_dealer_is_human) = {
             let seats = self.seats.lock().unwrap();
-            seats.iter().all(|s| s.is_bot())
+            let all_bots = seats.iter().all(|s| s.is_bot());
+            let nd_human = seats.get(next_dealer).map(|s| s.is_human()).unwrap_or(false);
+            (all_bots, nd_human)
         };
-        if !all_bots && requesting_seat != next_dealer {
-            return Err("only the next dealer can start the next hand".into());
+        if !all_bots {
+            let requester_is_human = {
+                let seats = self.seats.lock().unwrap();
+                seats.get(requesting_seat).map(|s| s.is_human()).unwrap_or(false)
+            };
+            if next_dealer_is_human && requesting_seat != next_dealer {
+                return Err("only the next dealer can start the next hand".into());
+            }
+            if !next_dealer_is_human && !requester_is_human {
+                return Err("only a human player can start the next hand".into());
+            }
         }
 
         self.start_next_hand(next_dealer);
@@ -597,10 +613,10 @@ impl Room {
         let _guard = Guard(&self.bots_running);
 
         loop {
-            let (seat, phase) = {
+            let (seat, phase, dealer) = {
                 let guard = self.state.lock().unwrap();
                 let Some(state) = guard.as_ref() else { break };
-                (state.current_player, state.phase.clone())
+                (state.current_player, state.phase.clone(), state.dealer)
             };
 
             // After play_card sets Scoring, it immediately transitions to Intermission
@@ -618,10 +634,7 @@ impl Room {
                 };
                 if has_human { break; } // wait for the human next-dealer to click
                 tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
-                let next_dealer = {
-                    let guard = self.state.lock().unwrap();
-                    guard.as_ref().map(|s| (s.dealer + 1) % self.player_count).unwrap_or(0)
-                };
+                let next_dealer = (dealer + 1) % self.player_count;
                 self.start_next_hand(next_dealer);
                 continue;
             }
