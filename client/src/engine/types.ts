@@ -8,7 +8,7 @@ export type Rank =
 
 export interface Card { suit: Suit; rank: Rank }
 
-export type GamePhase = 'lobby' | 'bidding' | 'playing' | 'scoring'
+export type GamePhase = 'lobby' | 'bidding' | 'playing' | 'scoring' | 'intermission'
 
 export interface SeatInfo {
   seat: number
@@ -34,6 +34,7 @@ export interface GameState {
   current_trick: Trick | null
   completed_tricks: Trick[]
   scores: number[]
+  session_scores?: number[]
   meta: Record<string, unknown>
   names: string[]
 }
@@ -50,6 +51,7 @@ export type ClientMessage =
   | { type: 'extend_rejoin'; seat: number }
   | { type: 'join_queue' }
   | { type: 'leave_queue' }
+  | { type: 'start_next_hand' }
 
 export type StateUpdate =
   | { type: 'joined_room';     room_id: string; seat: number; room_code: string }

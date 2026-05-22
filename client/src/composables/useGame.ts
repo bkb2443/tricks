@@ -84,9 +84,14 @@ export function useGame() {
     sendMessage({ type: 'extend_rejoin', seat })
   }
 
+  function startNextHand(): void {
+    sendMessage({ type: 'start_next_hand' })
+  }
+
   return {
     store, connected,
     createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
     joinWithCode, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
+    startNextHand,
   }
 }

@@ -13,7 +13,7 @@ import { useEuchreState } from '@/games/euchre/state'
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
-const { playCard } = useGame()
+const { playCard, startNextHand } = useGame()
 const { callerSeat, sitsOut, calledSuit } = useEuchreState()
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -82,6 +82,9 @@ onUnmounted(() => {
 })
 
 const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards, calledSuit.value))
+
+const nextDealer = computed(() => (state.value.dealer + 1) % state.value.player_count)
+const isNextDealer = computed(() => seat.value === nextDealer.value)
 </script>
 
 <template>
@@ -137,7 +140,7 @@ const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards,
 
     <!-- ── My hand ────────────────────────────────────────────── -->
     <section
-      v-if="state.phase !== 'scoring' && seat !== sitsOut"
+      v-if="state.phase !== 'scoring' && state.phase !== 'intermission' && seat !== sitsOut"
       class="my-hand"
       :class="{ 'your-turn-glow': canPlay }"
     >
@@ -203,6 +206,45 @@ const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards,
       <p class="next-hand-hint">Next hand starting…</p>
     </section>
 
+    <!-- ── Intermission (between hands) ──────────────────────── -->
+    <section v-if="state.phase === 'intermission' && !store.sessionWinner" class="game-over intermission-panel">
+      <h2>Hand Complete</h2>
+      <ul class="score-list">
+        <li
+          v-for="(score, i) in state.scores"
+          :key="i"
+          class="score-row"
+          :class="scoreClass(score)"
+        >
+          <span>{{ i === seat ? 'You (' + playerName(i) + ')' : playerName(i) }}</span>
+          <span class="score-value">{{ score > 0 ? '+' : '' }}{{ score }}</span>
+        </li>
+      </ul>
+      <div class="next-hand-controls">
+        <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
+        <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
+      </div>
+    </section>
+
+    <!-- ── Catch-up panel (shown to rejoining player) ────────── -->
+    <div v-if="store.showCatchUp" class="catchup-overlay">
+      <div class="catchup-panel">
+        <h3>You've rejoined</h3>
+        <p v-if="calledSuit">Trump: {{ SUIT_SYMBOLS[calledSuit] ?? calledSuit }}</p>
+        <p v-if="callerSeat !== null">Caller: {{ playerName(callerSeat) }}</p>
+        <div class="catchup-scores">
+          <h4>Current hand scores</h4>
+          <ul class="score-list">
+            <li v-for="(s, i) in state.scores" :key="i" class="score-row" :class="scoreClass(s)">
+              <span>{{ i === seat ? 'You' : playerName(i) }}</span>
+              <span class="score-value">{{ s > 0 ? '+' : '' }}{{ s }}</span>
+            </li>
+          </ul>
+        </div>
+        <button @click="store.dismissCatchUp()">Continue</button>
+      </div>
+    </div>
+
     <!-- ── Session over ──────────────────────────────────────── -->
     <section v-if="store.sessionWinner !== null" class="game-over session-over">
       <h2>{{ store.sessionWinner === seat ? '🏆 You Win!' : playerName(store.sessionWinner!) + ' Wins!' }}</h2>
@@ -259,6 +301,7 @@ const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards,
 .phase-badge.bidding { background: #7c3aed; }
 .phase-badge.playing { background: #15803d; }
 .phase-badge.scoring { background: #b45309; }
+.phase-badge.intermission { background: #1d4ed8; }
 .dealer-badge, .trick-counter { font-size: 0.8rem; color: #9ca3af; }
 
 /* Seat rail */
@@ -422,4 +465,56 @@ const euchreHandSortFn = computed(() => (cards: Card[]) => sortHandEuchre(cards,
   z-index: 100;
   letter-spacing: 0.04em;
 }
+
+/* Intermission panel */
+.intermission-panel { border: 1px solid rgba(99, 102, 241, 0.3); }
+.next-hand-controls { margin-top: 1rem; }
+.deal-button {
+  padding: 0.6rem 1.6rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.deal-button:hover { background: #4f46e5; }
+
+/* Catch-up overlay */
+.catchup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+.catchup-panel {
+  background: #1f2937;
+  border-radius: 12px;
+  padding: 1.5rem 2rem;
+  max-width: 360px;
+  width: 90%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.catchup-panel h3 { margin: 0; font-size: 1.2rem; }
+.catchup-panel h4 { margin: 0; font-size: 0.9rem; color: #9ca3af; }
+.catchup-panel p { margin: 0; font-size: 0.9rem; color: #d1d5db; }
+.catchup-scores { text-align: left; }
+.catchup-panel button {
+  padding: 0.5rem 1.5rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  align-self: center;
+}
+.catchup-panel button:hover { background: #4f46e5; }
 </style>

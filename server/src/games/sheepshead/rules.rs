@@ -238,6 +238,18 @@ impl Game for Sheepshead {
             .unwrap_or(0)
     }
 
+    fn default_max_hands(&self) -> Option<u32> {
+        Some(20)
+    }
+
+    fn match_winner(&self, cumulative_scores: &[i32]) -> Option<usize> {
+        cumulative_scores
+            .iter()
+            .enumerate()
+            .max_by_key(|&(_, &s)| s)
+            .map(|(i, _)| i)
+    }
+
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
         let n = tricks_by_player.len();
 

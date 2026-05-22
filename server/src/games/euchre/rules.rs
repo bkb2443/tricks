@@ -232,6 +232,30 @@ impl Game for Euchre {
             .unwrap_or(0)
     }
 
+    fn match_over(&self, cumulative_scores: &[i32], _hands_played: usize) -> bool {
+        if cumulative_scores.len() < 4 {
+            return false;
+        }
+        let team_a = cumulative_scores[0] + cumulative_scores[2];
+        let team_b = cumulative_scores[1] + cumulative_scores[3];
+        team_a >= 10 || team_b >= 10
+    }
+
+    fn match_winner(&self, cumulative_scores: &[i32]) -> Option<usize> {
+        if cumulative_scores.len() < 4 {
+            return None;
+        }
+        let team_a = cumulative_scores[0] + cumulative_scores[2];
+        let team_b = cumulative_scores[1] + cumulative_scores[3];
+        if team_a >= 10 && team_a >= team_b {
+            Some(0)
+        } else if team_b >= 10 {
+            Some(1)
+        } else {
+            None
+        }
+    }
+
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
         let n = tricks_by_player.len();
         let mut scores = vec![0i32; n];
