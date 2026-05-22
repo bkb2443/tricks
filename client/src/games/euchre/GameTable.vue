@@ -247,12 +247,13 @@ const isNextDealer = computed(() => seat.value === nextDealer.value)
 
     <!-- ── Session over ──────────────────────────────────────── -->
     <section v-if="store.sessionWinner !== null" class="game-over session-over">
-      <h2>{{ store.sessionWinner === seat ? '🏆 You Win!' : playerName(store.sessionWinner!) + ' Wins!' }}</h2>
+      <!-- Euchre: winner field is one seat on the winning team; check team membership. -->
+      <h2>{{ store.sessionWinner! % 2 === seat % 2 ? '🏆 Your Team Wins!' : 'Opponents Win!' }}</h2>
       <ul class="score-list">
         <li
           v-for="(score, i) in store.sessionScores"
           :key="i"
-          :class="['score-row', scoreClass(score), { winner: i === store.sessionWinner }]"
+          :class="['score-row', scoreClass(score), { winner: store.sessionWinner !== null && i % 2 === store.sessionWinner! % 2 }]"
         >
           <span>{{ i === seat ? 'You (' + playerName(i) + ')' : playerName(i) }}</span>
           <span class="score-value">{{ score > 0 ? '+' : '' }}{{ score }}</span>
