@@ -4,6 +4,7 @@ import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
+import HandReplay from '@/components/HandReplay.vue'
 import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
@@ -82,6 +83,23 @@ const calledSuit = computed<string | null>(() => {
 
 const nextDealer = computed(() => (state.value.dealer + 1) % state.value.player_count)
 const isNextDealer = computed(() => seat.value === nextDealer.value)
+
+const showReplay = ref(false)
+
+const buryForReplay = computed<{ picker: number; cards: Card[] } | null>(() => {
+  const picker = state.value.meta?.picker
+  const buried = state.value.meta?.buried
+  if (typeof picker !== 'number' || !Array.isArray(buried) || buried.length === 0) return null
+  return { picker, cards: buried as Card[] }
+})
+
+function openReplay() { showReplay.value = true }
+function closeReplay() { showReplay.value = false }
+
+watch(
+  () => state.value?.phase,
+  (phase) => { if (phase !== 'intermission') showReplay.value = false },
+)
 </script>
 
 <template>
@@ -211,7 +229,20 @@ const isNextDealer = computed(() => seat.value === nextDealer.value)
         <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
         <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
       </div>
+      <div v-if="state.completed_tricks.length" class="replay-entry">
+        <button class="replay-button" @click="openReplay">View Replay</button>
+      </div>
     </section>
+
+    <!-- ── Hand replay (intermission only) ────────────────────── -->
+    <hand-replay
+      v-if="showReplay && state.phase === 'intermission'"
+      :tricks="state.completed_tricks"
+      :names="state.names ?? []"
+      :my-seat="seat"
+      :bury="buryForReplay"
+      @close="closeReplay"
+    />
 
     <!-- ── Catch-up panel (shown to rejoining player) ────────── -->
     <div v-if="store.showCatchUp" class="catchup-overlay">
@@ -451,6 +482,17 @@ const isNextDealer = computed(() => seat.value === nextDealer.value)
   cursor: pointer;
 }
 .deal-button:hover { background: #4f46e5; }
+.replay-entry { margin-top: 0.6rem; }
+.replay-button {
+  padding: 0.45rem 1rem;
+  background: transparent;
+  color: #c7d2fe;
+  border: 1px solid #6366f1;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.replay-button:hover { background: rgba(99, 102, 241, 0.15); }
 
 /* Catch-up overlay */
 .catchup-overlay {
