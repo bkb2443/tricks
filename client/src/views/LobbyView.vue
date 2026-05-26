@@ -76,6 +76,11 @@ const seatStateLabel = (state: string) =>
       </div>
     </header>
 
+    <!-- Spectator count -->
+    <p v-if="gs.spectatorCount > 0" class="spectator-count">
+      {{ gs.spectatorCount }} {{ gs.spectatorCount === 1 ? 'person' : 'people' }} watching
+    </p>
+
     <!-- Seat rail -->
     <section class="seats">
       <div
@@ -140,6 +145,7 @@ h1 { margin: 0; font-size: 2rem; }
 .room-code { display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.08); border-radius: 6px; padding: 0.3rem 0.75rem; font-family: monospace; font-size: 1.2rem; }
 .btn-copy { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0; }
 
+.spectator-count { margin: 0 0 0.5rem; font-size: 0.8rem; color: #9ca3af; }
 .seats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
 .seat-card { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 0.75rem; text-align: center; border: 1px solid transparent; }
 .seat-card.me { border-color: rgba(34,197,94,0.6); }

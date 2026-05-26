@@ -55,6 +55,11 @@ export function useGame() {
     sendMessage({ type: 'join', name, room_code: roomCode })
   }
 
+  function spectateRoom(name: string, roomCode: string): void {
+    store.isSolo = false
+    sendMessage({ type: 'spectate', name, room_code: roomCode })
+  }
+
   function createPrivateRoom(game: string, maxHands: number | null, name: string): void {
     store.isSolo = false
     sendMessage({ type: 'create_room', name, game, max_hands: maxHands })
@@ -91,7 +96,7 @@ export function useGame() {
   return {
     store, connected,
     createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
-    joinWithCode, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
+    joinWithCode, spectateRoom, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
     startNextHand,
   }
 }

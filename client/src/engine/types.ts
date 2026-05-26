@@ -43,6 +43,7 @@ export type ClientMessage =
   | { type: 'join_room'; room_id?: string; game: string; players: number; fill_bots?: boolean }
   | { type: 'create_room'; name: string; game: string; max_hands: number | null }
   | { type: 'join'; name: string; room_code: string }
+  | { type: 'spectate'; name: string; room_code: string }
   | { type: 'play_card'; card: Card }
   | { type: 'bid'; value: unknown }
   | { type: 'lobby_chat'; text: string }
@@ -55,6 +56,7 @@ export type ClientMessage =
 
 export type StateUpdate =
   | { type: 'joined_room';     room_id: string; seat: number; room_code: string }
+  | { type: 'joined_as_spectator'; room_id: string; room_code: string }
   | { type: 'snapshot';        state: GameState }
   | { type: 'card_played';     player: number; card: Card; current_trick_winner?: number; next_player: number }
   | { type: 'trick_complete';  winner: number; points: number }
@@ -65,6 +67,6 @@ export type StateUpdate =
   | { type: 'phase_changed';   phase: GamePhase }
   | { type: 'partner_revealed'; seat: number }
   | { type: 'lobby_chat';      from: string; text: string; timestamp: number }
-  | { type: 'seat_update';     seats: SeatInfo[] }
+  | { type: 'seat_update';     seats: SeatInfo[]; spectator_count: number }
   | { type: 'queue_status';    position: number; waiting_since: number }
   | { type: 'error';           message: string }

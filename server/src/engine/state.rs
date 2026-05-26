@@ -103,6 +103,16 @@ impl GameState {
         view
     }
 
+    /// Build a snapshot for a spectator: all hands and extra piles cleared.
+    pub fn redacted_for_spectator(&self) -> GameState {
+        let mut view = self.clone();
+        for hand in view.hands.iter_mut() {
+            hand.clear();
+        }
+        view.extra_piles.clear();
+        view
+    }
+
     /// Creates a GameState in Lobby phase (no hands dealt yet).
     #[allow(dead_code)]
     pub fn new_lobby(
@@ -150,6 +160,8 @@ pub enum ClientMessage {
     CreateRoom { name: String, game: String, max_hands: Option<u32> },
     /// Multiplayer: join an existing room by short code.
     Join { name: String, room_code: String },
+    /// Join an existing room as a spectator (no seat, no game actions).
+    Spectate { name: String, room_code: String },
     /// Play a card during the Playing phase.
     PlayCard { card: Card },
     /// Generic bid payload; shape is game-specific.
@@ -180,6 +192,8 @@ pub enum ClientMessage {
 pub enum StateUpdate {
     /// Sent immediately after a successful JoinRoom. Tells the client its seat index.
     JoinedRoom { room_id: Uuid, seat: usize, room_code: String },
+    /// Sent immediately after a successful Spectate. No seat assigned.
+    JoinedAsSpectator { room_id: Uuid, room_code: String },
     /// Full state snapshot sent once dealing is complete. Only `hands[seat]` is
     /// populated; other hands are empty. `extra_piles` is also cleared (blind is hidden).
     Snapshot { state: GameState },
@@ -204,7 +218,7 @@ pub enum StateUpdate {
     /// Lobby chat message broadcast to all players.
     LobbyChat { from: String, text: String, timestamp: u64 },
     /// Seat status update broadcast to all players in the lobby.
-    SeatUpdate { seats: Vec<SeatInfo> },
+    SeatUpdate { seats: Vec<SeatInfo>, #[serde(default)] spectator_count: usize },
     /// Queue status for waiting players.
     QueueStatus { position: usize, waiting_since: u64 },
     Error { message: String },
