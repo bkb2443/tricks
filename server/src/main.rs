@@ -30,7 +30,8 @@ async fn main() {
         .layer(CorsLayer::permissive())
         .with_state(lobby);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let port = std::env::var("PORT").ok().and_then(|p| p.parse::<u16>().ok()).unwrap_or(3000);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
 }
