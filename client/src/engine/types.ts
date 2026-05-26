@@ -1,6 +1,8 @@
 // These types mirror the Rust server structs exactly.
 export type Suit = 'clubs' | 'spades' | 'hearts' | 'diamonds'
 
+export interface ChatMessage { from: string; text: string; timestamp: number }
+
 export type Rank =
   | 'two' | 'three' | 'four' | 'five' | 'six'
   | 'seven' | 'eight' | 'nine' | 'ten'

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
+import type { Card, ChatMessage, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ export const useGameStore = defineStore('game', () => {
   const showCatchUp = ref<boolean>(false)
   const partnerRevealedSeat = ref<number | null>(null)
   const seats          = ref<SeatInfo[]>([])
-  const lobbyChat      = ref<Array<{ from: string; text: string; timestamp: number }>>([])
+  const lobbyChat      = ref<ChatMessage[]>([])
   const queueStatus    = ref<{ position: number; waiting_since: number } | null>(null)
   const roomCode       = ref<string | null>(null)
   let pauseTimer: ReturnType<typeof setTimeout> | null = null
