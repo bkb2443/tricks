@@ -111,6 +111,7 @@ watch(
       <span class="trick-counter">
         Trick {{ completedTricks + currentTrickCount }} / 5
       </span>
+      <span v-if="store.isSpectator" class="spectator-badge">Watching</span>
     </header>
 
     <!-- ── Seat rail (other players) ──────────────────────────── -->
@@ -145,12 +146,12 @@ watch(
       :current-winner-seat="store.currentTrickWinner"
     />
 
-    <!-- ── Bidding panel (only during Bidding phase) ──────────── -->
-    <euchre-bidding-panel v-if="state.phase === 'bidding'" />
+    <!-- ── Bidding panel (only during Bidding phase, not for spectators) ── -->
+    <euchre-bidding-panel v-if="state.phase === 'bidding' && !store.isSpectator" />
 
     <!-- ── My hand ────────────────────────────────────────────── -->
     <section
-      v-if="state.phase !== 'scoring' && state.phase !== 'intermission' && seat !== sitsOut"
+      v-if="!store.isSpectator && state.phase !== 'scoring' && state.phase !== 'intermission' && seat !== sitsOut"
       class="my-hand"
       :class="{ 'your-turn-glow': canPlay }"
     >
@@ -231,7 +232,10 @@ watch(
         </li>
       </ul>
       <div class="next-hand-controls">
-        <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
+        <template v-if="!store.isSpectator">
+          <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
+          <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
+        </template>
         <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
       </div>
       <div v-if="state.completed_tricks.length" class="replay-entry">
@@ -271,7 +275,7 @@ watch(
     <!-- ── Session over ──────────────────────────────────────── -->
     <section v-if="store.sessionWinner !== null" class="game-over session-over">
       <!-- Euchre: winner field is one seat on the winning team; check team membership. -->
-      <h2>{{ store.sessionWinner! % 2 === seat % 2 ? '🏆 Your Team Wins!' : 'Opponents Win!' }}</h2>
+      <h2>{{ (!store.isSpectator && store.sessionWinner! % 2 === seat % 2) ? '🏆 Your Team Wins!' : (store.sessionWinner! % 2 === 0 ? 'Team 1 Wins!' : 'Team 2 Wins!') }}</h2>
       <ul class="score-list">
         <li
           v-for="(score, i) in store.sessionScores"
@@ -327,6 +331,7 @@ watch(
 .phase-badge.scoring { background: #b45309; }
 .phase-badge.intermission { background: #1d4ed8; }
 .dealer-badge, .trick-counter { font-size: 0.8rem; color: #9ca3af; }
+.spectator-badge { font-size: 0.7rem; background: #374151; color: #d1d5db; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
 
 /* Seat rail */
 .seats {

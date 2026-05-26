@@ -72,6 +72,13 @@ impl SeatState {
     }
 }
 
+// ── Spectator ─────────────────────────────────────────────────────────────────
+
+struct SpectatorEntry {
+    ws_id: Uuid,
+    tx: mpsc::Sender<StateUpdate>,
+}
+
 // ── Room ─────────────────────────────────────────────────────────────────────
 
 pub struct Room {
@@ -90,6 +97,7 @@ pub struct Room {
     chat_history: Mutex<VecDeque<(String, String, u64)>>, // (from, text, timestamp_ms)
     max_hands: Mutex<Option<u32>>,
     hands_played: Mutex<u32>,
+    spectators: Mutex<Vec<SpectatorEntry>>,
 }
 
 impl Room {
@@ -126,6 +134,7 @@ impl Room {
             chat_history: Mutex::new(VecDeque::new()),
             max_hands: Mutex::new(None),
             hands_played: Mutex::new(0),
+            spectators: Mutex::new(Vec::new()),
         }
     }
 
@@ -143,6 +152,17 @@ impl Room {
     fn host_seat(&self) -> Option<usize> {
         let seats = self.seats.lock().unwrap();
         seats.iter().position(|s| s.is_human())
+    }
+
+    fn spectator_count(&self) -> usize {
+        self.spectators.lock().unwrap().len()
+    }
+
+    fn seat_update(&self) -> StateUpdate {
+        StateUpdate::SeatUpdate {
+            seats: self.seat_infos(),
+            spectator_count: self.spectator_count(),
+        }
     }
 
     // ── Joining ───────────────────────────────────────────────────────────────
@@ -200,9 +220,9 @@ impl Room {
 
         // Send seat update privately to the joiner (they subscribe to broadcast after this call,
         // so they'd miss the broadcast version), then broadcast to other players already in the room.
-        let seat_infos = self.seat_infos();
-        let _ = tx.try_send(StateUpdate::SeatUpdate { seats: seat_infos.clone() });
-        self.broadcast(StateUpdate::SeatUpdate { seats: seat_infos });
+        let seat_upd = self.seat_update();
+        let _ = tx.try_send(seat_upd.clone());
+        self.broadcast(seat_upd);
         tracing::info!(room_code = %self.room_code, seat, name, "player joined lobby");
 
         Some((seat, self.broadcast_tx.subscribe()))
@@ -224,6 +244,41 @@ impl Room {
         }
         if all_filled { self.start_game_inner(); }
         Some((seat, self.broadcast_tx.subscribe()))
+    }
+
+    /// Join as a spectator. Returns a broadcast receiver so the caller receives
+    /// public events. A fully-redacted snapshot and chat history are sent privately.
+    pub fn join_as_spectator(
+        &self,
+        ws_id: Uuid,
+        tx: mpsc::Sender<StateUpdate>,
+    ) -> broadcast::Receiver<StateUpdate> {
+        self.spectators.lock().unwrap().push(SpectatorEntry { ws_id, tx: tx.clone() });
+
+        let snapshot = self.state.lock().unwrap()
+            .as_ref()
+            .map(|s| s.redacted_for_spectator());
+        if let Some(state) = snapshot {
+            let _ = tx.try_send(StateUpdate::Snapshot { state });
+        }
+        for (from, text, timestamp) in self.chat_history.lock().unwrap().iter() {
+            let _ = tx.try_send(StateUpdate::LobbyChat {
+                from: from.clone(),
+                text: text.clone(),
+                timestamp: *timestamp,
+            });
+        }
+        // Send seat update to the spectator directly (they subscribe to broadcast after
+        // this returns, so they'd miss the broadcast version) then broadcast to others.
+        let seat_upd = self.seat_update();
+        let _ = tx.try_send(seat_upd.clone());
+        self.broadcast(seat_upd);
+        self.broadcast_tx.subscribe()
+    }
+
+    pub fn on_spectator_disconnect(&self, ws_id: Uuid) {
+        self.spectators.lock().unwrap().retain(|s| s.ws_id != ws_id);
+        self.broadcast(self.seat_update());
     }
 
     // ── Lobby chat ────────────────────────────────────────────────────────────
@@ -324,7 +379,7 @@ impl Room {
                 *s = SeatState::Empty;
             }
             drop(seats);
-            self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
+            self.broadcast(self.seat_update());
         } else {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             {
@@ -333,7 +388,7 @@ impl Room {
                     *s = SeatState::Disconnected { name: name.clone(), rejoin_deadline: deadline, extend_used: false };
                 }
             }
-            self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
+            self.broadcast(self.seat_update());
             self.system_chat(format!("{name} disconnected — 30 seconds to rejoin."));
 
             let room = Arc::clone(self);
@@ -357,7 +412,7 @@ impl Room {
                     *s = SeatState::Bot { original_name: Some(expected_name.to_string()) };
                 }
             }
-            self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
+            self.broadcast(self.seat_update());
             self.system_chat(format!("{expected_name}'s hand has been taken over by a bot."));
         }
     }
@@ -399,7 +454,7 @@ impl Room {
             let _ = tx.try_send(StateUpdate::Snapshot { state });
         }
 
-        self.broadcast(StateUpdate::SeatUpdate { seats: self.seat_infos() });
+        self.broadcast(self.seat_update());
         self.system_chat(format!("{name} rejoined."));
         true
     }
@@ -694,6 +749,13 @@ impl Room {
                 let Some(tx) = seat_state.tx() else { continue };
                 let view = state.redacted_for(seat, self.game.as_ref());
                 let _ = tx.try_send(StateUpdate::Snapshot { state: view });
+            }
+        }
+        {
+            let spectator_view = state.redacted_for_spectator();
+            let spectators = self.spectators.lock().unwrap();
+            for s in spectators.iter() {
+                let _ = s.tx.try_send(StateUpdate::Snapshot { state: spectator_view.clone() });
             }
         }
         *self.state.lock().unwrap() = Some(state);
