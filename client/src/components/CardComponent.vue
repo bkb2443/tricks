@@ -24,14 +24,17 @@ const symbol = computed(() => SUIT_SYMBOL[props.card.suit])
 const isRed  = computed(() => props.card.suit === 'hearts' || props.card.suit === 'diamonds')
 
 function handleClick() {
+  if (dragJustEnded) return
   if (props.selectable) emit('select', props.card)
 }
 
 // Touch drag-to-play
 const dragOffsetY = ref(0)
 const isDragging = ref(false)
+const isSnappingBack = ref(false)
 const isCancelling = ref(false)
 let touchStartY = 0
+let dragJustEnded = false
 
 const PLAY_THRESHOLD = 40
 
@@ -39,6 +42,7 @@ function onTouchStart(e: TouchEvent) {
   if (!props.selectable) return
   touchStartY = e.touches[0].clientY
   isDragging.value = true
+  isSnappingBack.value = false
   dragOffsetY.value = 0
 }
 
@@ -46,27 +50,35 @@ function onTouchMove(e: TouchEvent) {
   if (!isDragging.value) return
   e.preventDefault()
   const deltaY = touchStartY - e.touches[0].clientY
-  // Only move upward (positive deltaY means upward); clamp at 0 so card doesn't go down
   dragOffsetY.value = Math.max(0, deltaY)
 }
 
 function onTouchEnd() {
   if (!isDragging.value) return
   isDragging.value = false
+  dragJustEnded = true
+  setTimeout(() => { dragJustEnded = false }, 300)
   if (dragOffsetY.value >= PLAY_THRESHOLD) {
     dragOffsetY.value = 0
     emit('select', props.card)
   } else {
-    // Snap back with shake animation
+    // Animate back to resting position, then shake
+    isSnappingBack.value = true
     dragOffsetY.value = 0
-    isCancelling.value = true
-    setTimeout(() => { isCancelling.value = false }, 250)
+    setTimeout(() => {
+      isSnappingBack.value = false
+      isCancelling.value = true
+      setTimeout(() => { isCancelling.value = false }, 250)
+    }, 100)
   }
 }
 
 const dragStyle = computed(() => {
-  if (dragOffsetY.value > 0) {
+  if (isDragging.value && dragOffsetY.value > 0) {
     return { transform: `translateY(-${dragOffsetY.value}px)`, transition: 'none' }
+  }
+  if (isSnappingBack.value) {
+    return { transform: 'translateY(0)', transition: 'transform 0.1s ease' }
   }
   return {}
 })
@@ -155,7 +167,7 @@ const dragStyle = computed(() => {
 @media (max-width: 640px) {
   .corner { font-size: 0.55rem; }
   .center-symbol { font-size: 1.15rem; }
-  .card.selectable:hover { transform: translateY(-4px); }
+  .card.selectable:hover { transform: none; box-shadow: none; }
   .card.selected { transform: translateY(-8px); }
 }
 </style>
