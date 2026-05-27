@@ -166,4 +166,27 @@ h1 { margin: 0; font-size: 2rem; }
 .hint { color: #9ca3af; font-size: 0.85rem; margin: 0 0 0.5rem; }
 .waiting { color: #6b7280; font-style: italic; }
 .countdown { color: #fbbf24; font-size: 1.1rem; font-weight: 700; margin-top: 0.5rem; }
+
+@media (max-width: 640px) {
+  .lobby {
+    margin: 0.75rem auto;
+    gap: 0.75rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .seats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .seat-card {
+    padding: 0.5rem;
+  }
+
+  .seat-name {
+    font-size: 0.8rem;
+  }
+}
 </style>
