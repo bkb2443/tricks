@@ -34,6 +34,25 @@ onMounted(connectSocket)
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 
+:root {
+  --card-w: 62px;
+  --card-h: 92px;
+  --card-corner-font: 0.7rem;
+  --card-center-font: 1.6rem;
+  --card-gap: 6px;
+}
+
+@media (max-width: 480px) {
+  :root {
+    --card-w: 44px;
+    --card-h: 64px;
+    --card-corner-font: 0.6rem;
+    --card-center-font: 1.2rem;
+    --card-gap: 4px;
+  }
+  main { padding: 0.5rem; }
+}
+
 body {
   margin: 0;
   font-family: system-ui, sans-serif;

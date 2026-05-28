@@ -161,4 +161,12 @@ input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0
 .game-name { font-size: 1rem; font-weight: 600; }
 .game-detail { font-size: 0.75rem; color: #9ca3af; }
 .game-option.selected .game-detail { color: #c7d2fe; }
+
+@media (max-width: 480px) {
+  .home { margin: 1rem auto; }
+  h1 { font-size: 2rem; margin-bottom: 1rem; }
+  .panels { grid-template-columns: 1fr; }
+  .join-code-section { grid-column: auto; }
+  .solo { flex-direction: column; align-items: flex-start; }
+}
 </style>

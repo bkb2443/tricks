@@ -42,7 +42,7 @@ function isSelected(card: Card): boolean {
 .hand {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--card-gap, 6px);
   padding: 0.5rem;
   justify-content: center;
 }

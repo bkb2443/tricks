@@ -112,6 +112,9 @@ h1 { margin: 0; font-size: 2rem; }
 .btn-copy { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0; }
 
 .seats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
+@media (max-width: 480px) {
+  .seats { grid-template-columns: repeat(3, 1fr); }
+}
 .seat-card { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 0.75rem; text-align: center; border: 1px solid transparent; }
 .seat-card.me { border-color: rgba(34,197,94,0.6); }
 .seat-card.empty .seat-name { color: #4b5563; }
