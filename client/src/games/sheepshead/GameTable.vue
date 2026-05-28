@@ -5,6 +5,7 @@ import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
 import HandReplay from '@/components/HandReplay.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
 import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
@@ -12,7 +13,27 @@ import { phaseLabel } from '@/engine/phases'
 const store = useGameStore()
 // Safe to call in template (reads reactive refs); do not cache the return value outside a template
 const { playerName } = store
-const { playCard, startNextHand } = useGame()
+const { playCard, startNextHand, sendLobbyChat } = useGame()
+
+// ── In-game chat ──────────────────────────────────────────────────────────────
+const chatOpen   = ref(false)
+const unreadCount = ref(0)
+let lastSeenCount = store.lobbyChat.length
+
+watch(() => store.lobbyChat.length, (len) => {
+  if (!chatOpen.value) {
+    unreadCount.value += len - lastSeenCount
+  }
+  lastSeenCount = len
+})
+
+function toggleChat() {
+  chatOpen.value = !chatOpen.value
+  if (chatOpen.value) {
+    unreadCount.value = 0
+    lastSeenCount = store.lobbyChat.length
+  }
+}
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const state = computed(() => store.gameState!)
@@ -290,6 +311,19 @@ watch(
         </li>
       </ol>
     </details>
+
+    <!-- ── In-game chat (playing + intermission only) ────────── -->
+    <template v-if="state.phase === 'playing' || state.phase === 'intermission'">
+      <button class="chat-toggle" @click="toggleChat" :aria-label="chatOpen ? 'Close chat' : 'Open chat'">
+        💬
+        <span v-if="!chatOpen && unreadCount > 0" class="unread-badge">{{ unreadCount }}</span>
+      </button>
+      <Transition name="chat-slide">
+        <div v-if="chatOpen" class="chat-drawer">
+          <chat-panel :messages="store.lobbyChat" :on-send="sendLobbyChat" />
+        </div>
+      </Transition>
+    </template>
   </div>
 </template>
 
@@ -493,6 +527,65 @@ watch(
   cursor: pointer;
 }
 .replay-button:hover { background: rgba(99, 102, 241, 0.15); }
+
+/* In-game chat */
+.chat-toggle {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  z-index: 60;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: #374151;
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.chat-toggle:hover { background: #4b5563; }
+.unread-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
+}
+.chat-drawer {
+  position: fixed;
+  bottom: 5rem;
+  right: 1.25rem;
+  z-index: 60;
+  width: 280px;
+  height: 340px;
+  background: #1f2937;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+}
+.chat-slide-enter-active, .chat-slide-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.chat-slide-enter-from, .chat-slide-leave-to {
+  opacity: 0;
+  transform: translateY(12px) scale(0.97);
+}
 
 /* Catch-up overlay */
 .catchup-overlay {
