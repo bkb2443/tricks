@@ -1,4 +1,4 @@
-use crate::engine::{Card, GameState, GamePhase, Trick};
+use crate::engine::{Card, GameMeta, GamePhase, GameState, Trick};
 
 // ---------------------------------------------------------------------------
 // Deal
@@ -11,7 +11,7 @@ pub struct DealResult {
     /// Named extra piles, e.g. `[("blind", [card1, card2])]` for Sheepshead.
     pub extra_piles: Vec<(String, Vec<Card>)>,
     /// Initial game-specific metadata stored in `GameState::meta`.
-    pub initial_meta: serde_json::Value,
+    pub initial_meta: GameMeta,
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,11 @@ pub enum PlayResult {
     /// A trick just completed.
     TrickComplete { winner: usize, points: u8 },
     /// All tricks played; `GameState::phase` has been set to `Scoring`.
-    GameOver { last_trick_winner: usize, last_trick_points: u8, scores: Vec<i32> },
+    GameOver {
+        last_trick_winner: usize,
+        last_trick_points: u8,
+        scores: Vec<i32>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +97,12 @@ pub fn apply_play_generic(
     // Remove from hand, add to trick
     let pos = state.hands[seat].iter().position(|c| *c == card).unwrap();
     state.hands[seat].remove(pos);
-    state.current_trick.as_mut().unwrap().plays.push((seat, card));
+    state
+        .current_trick
+        .as_mut()
+        .unwrap()
+        .plays
+        .push((seat, card));
 
     let player_count = state.player_count;
     let trick_size = active_seats.map(|s| s.len()).unwrap_or(player_count);
@@ -137,11 +146,19 @@ pub fn apply_play_generic(
         });
     }
 
-    Ok(PlayResult::TrickComplete { winner: winner_seat, points })
+    Ok(PlayResult::TrickComplete {
+        winner: winner_seat,
+        points,
+    })
 }
 
 /// Returns the seat of the `plays_so_far`-th player in active-seat rotation from `led_by`.
-fn next_active_player(led_by: usize, plays_so_far: usize, active: &[usize], player_count: usize) -> usize {
+fn next_active_player(
+    led_by: usize,
+    plays_so_far: usize,
+    active: &[usize],
+    player_count: usize,
+) -> usize {
     let mut count = 0usize;
     let mut seat = led_by;
     loop {

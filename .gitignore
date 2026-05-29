@@ -6,5 +6,6 @@ client/.vscode/
 client/.idea/
 .fastembed_cache/
 server/target/
+server/bindings/
 .run/
 .superpowers/

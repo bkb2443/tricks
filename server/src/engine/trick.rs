@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::engine::Card;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Trick {
     /// Index of the player who led this trick.
     pub led_by: usize,
@@ -14,7 +16,11 @@ pub struct Trick {
 
 impl Trick {
     pub fn new(led_by: usize) -> Self {
-        Self { led_by, plays: Vec::new(), winner: None }
+        Self {
+            led_by,
+            plays: Vec::new(),
+            winner: None,
+        }
     }
 
     pub fn led_card(&self) -> Option<Card> {

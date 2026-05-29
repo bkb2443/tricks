@@ -1,6 +1,7 @@
+use crate::engine::meta::SheepsheadMeta;
 use crate::engine::{
-    BidResult, Card, DealResult, GamePhase, GameState, Rank, Suit, Trick,
-    game::{apply_play_generic, EffectiveSuit, Game},
+    BidResult, Card, DealResult, GameMeta, GamePhase, GameState, Rank, Suit, Trick,
+    game::{EffectiveSuit, Game, apply_play_generic},
 };
 
 pub struct Sheepshead;
@@ -46,6 +47,26 @@ fn plain_strength(card: Card) -> u8 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Meta access helpers
+// ---------------------------------------------------------------------------
+
+fn sheepshead_meta(state: &GameState) -> Option<&SheepsheadMeta> {
+    if let GameMeta::Sheepshead(ref m) = state.meta {
+        Some(m)
+    } else {
+        None
+    }
+}
+
+fn sheepshead_meta_mut(state: &mut GameState) -> Option<&mut SheepsheadMeta> {
+    if let GameMeta::Sheepshead(ref mut m) = state.meta {
+        Some(m)
+    } else {
+        None
+    }
+}
+
 impl Game for Sheepshead {
     fn name(&self) -> &'static str {
         "sheepshead"
@@ -58,8 +79,14 @@ impl Game for Sheepshead {
     fn build_deck(&self) -> Vec<Card> {
         // 32-card deck: ranks 7–A across all four suits
         let ranks = [
-            Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
-            Rank::Jack, Rank::Queen, Rank::King, Rank::Ace,
+            Rank::Seven,
+            Rank::Eight,
+            Rank::Nine,
+            Rank::Ten,
+            Rank::Jack,
+            Rank::Queen,
+            Rank::King,
+            Rank::Ace,
         ];
         let suits = [Suit::Clubs, Suit::Spades, Suit::Hearts, Suit::Diamonds];
         suits
@@ -96,21 +123,16 @@ impl Game for Sheepshead {
         DealResult {
             hands,
             extra_piles: vec![("blind".to_string(), blind)],
-            // `picker` null  → picking sub-phase (current_player = left of dealer)
-            // `picker` set   → burying sub-phase (current_player = picker)
-            // `passed`       → how many players have passed so far
-            // `buried`       → two cards the picker chose to set aside
-            // `leaster`      → true when all five players pass
-            initial_meta: serde_json::json!({
-                "picker":         null,
-                "sub_phase":      "picking",
-                "passed":         0,
-                "buried":         [],
-                "leaster":        false,
-                "callable_suits": [],
-                "called_suit":    null,
-                "going_alone":    false,
-                "partner":        null
+            initial_meta: GameMeta::Sheepshead(SheepsheadMeta {
+                picker: None,
+                sub_phase: "picking".into(),
+                passed: 0,
+                leaster: false,
+                buried: vec![],
+                callable_suits: vec![],
+                called_suit: None,
+                going_alone: false,
+                partner: None,
             }),
         }
     }
@@ -123,15 +145,7 @@ impl Game for Sheepshead {
         true
     }
 
-    /// Handle pick, pass, and bury actions.
-    ///
-    /// Picking sub-phase  (`meta.picker == null`):
-    ///   `{ "action": "pick" }`  — take the blind; move to burying sub-phase.
-    ///   `{ "action": "pass" }`  — decline; advance to next player (or leaster).
-    ///
-    /// Burying sub-phase  (`meta.picker` is set):
-    ///   `{ "action": "bury", "cards": [<card>, <card>] }`  — discard 2 cards,
-    ///   store in `meta.buried`, transition to `Playing`.
+    /// Handle pick, pass, bury, call, and go_alone actions.
     fn apply_bid(
         &self,
         state: &mut GameState,
@@ -143,9 +157,11 @@ impl Game for Sheepshead {
         }
 
         let action = value["action"].as_str().ok_or("missing 'action' field")?;
-        let sub_phase = state.meta["sub_phase"].as_str().unwrap_or("picking");
+        let sub_phase = sheepshead_meta(state)
+            .map(|m| m.sub_phase.clone())
+            .unwrap_or_else(|| "picking".into());
 
-        match sub_phase {
+        match sub_phase.as_str() {
             "picking" => self.handle_pick_or_pass(state, seat, action),
             "burying" => self.handle_bury(state, seat, action, value),
             "calling" => self.handle_call(state, seat, action, value),
@@ -160,21 +176,30 @@ impl Game for Sheepshead {
         card: Card,
     ) -> Result<crate::engine::PlayResult, String> {
         // Partner revelation: if the called ace is played while partner is unknown, reveal them
-        if state.meta["partner"].is_null()
-            && !state.meta["going_alone"].as_bool().unwrap_or(false)
-            && card.rank == Rank::Ace
-            && let Some(suit_str) = state.meta["called_suit"].as_str()
-        {
-            let suit_matches = match suit_str {
-                "clubs"  => card.suit == Suit::Clubs,
-                "spades" => card.suit == Suit::Spades,
-                "hearts" => card.suit == Suit::Hearts,
-                _        => false,
-            };
-            if suit_matches {
-                state.meta["partner"] = serde_json::json!(seat);
+        let should_reveal = {
+            let meta = sheepshead_meta(state);
+            if let Some(m) = meta {
+                m.partner.is_none()
+                    && !m.going_alone
+                    && card.rank == Rank::Ace
+                    && m.called_suit
+                        .as_deref()
+                        .map(|suit_str| match suit_str {
+                            "clubs" => card.suit == Suit::Clubs,
+                            "spades" => card.suit == Suit::Spades,
+                            "hearts" => card.suit == Suit::Hearts,
+                            _ => false,
+                        })
+                        .unwrap_or(false)
+            } else {
+                false
             }
+        };
+
+        if should_reveal && let Some(m) = sheepshead_meta_mut(state) {
+            m.partner = Some(seat);
         }
+
         apply_play_generic(self, state, seat, card, None)
     }
 
@@ -204,7 +229,11 @@ impl Game for Sheepshead {
             .filter(|&&c| self.effective_suit(c, state) == led_suit)
             .copied()
             .collect();
-        if matching.is_empty() { hand.to_vec() } else { matching }
+        if matching.is_empty() {
+            hand.to_vec()
+        } else {
+            matching
+        }
     }
 
     fn card_points(&self, card: Card) -> u8 {
@@ -253,8 +282,10 @@ impl Game for Sheepshead {
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
         let n = tricks_by_player.len();
 
+        let meta = sheepshead_meta(state);
+
         // ── Leaster ──────────────────────────────────────────────────────────────
-        if state.meta["leaster"].as_bool().unwrap_or(false) {
+        if meta.map(|m| m.leaster).unwrap_or(false) {
             let raw: Vec<i32> = tricks_by_player
                 .iter()
                 .map(|tricks| {
@@ -271,9 +302,9 @@ impl Game for Sheepshead {
                 .collect();
         }
 
-        let picker = state.meta["picker"].as_u64().unwrap_or(0) as usize;
-        let partner = state.meta["partner"].as_u64().map(|p| p as usize);
-        let going_alone = state.meta["going_alone"].as_bool().unwrap_or(false);
+        let picker = meta.and_then(|m| m.picker).unwrap_or(0);
+        let partner = meta.and_then(|m| m.partner);
+        let going_alone = meta.map(|m| m.going_alone).unwrap_or(false);
 
         // Compute card points per player from tricks
         let raw: Vec<i32> = tricks_by_player
@@ -287,13 +318,14 @@ impl Game for Sheepshead {
             .collect();
 
         // Buried cards count toward picker's total
-        let buried_points: i32 = state.meta["buried"]
-            .as_array()
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|v| serde_json::from_value::<Card>(v.clone()).ok())
-            .map(|c| self.card_points(c) as i32)
-            .sum();
+        let buried_points: i32 = meta
+            .map(|m| {
+                m.buried
+                    .iter()
+                    .map(|c| self.card_points(*c) as i32)
+                    .sum::<i32>()
+            })
+            .unwrap_or(0);
 
         let picker_total = raw[picker] + buried_points;
 
@@ -311,17 +343,17 @@ impl Game for Sheepshead {
                 .map(|i| {
                     if i == picker {
                         match (picker_wins, schneider) {
-                            (true,  true)  =>  8,
-                            (true,  false) =>  4,
-                            (false, true)  => -8,
+                            (true, true) => 8,
+                            (true, false) => 4,
+                            (false, true) => -8,
                             (false, false) => -4,
                         }
                     } else {
                         match (picker_wins, schneider) {
-                            (true,  true)  => -2,
-                            (true,  false) => -1,
-                            (false, true)  =>  2,
-                            (false, false) =>  1,
+                            (true, true) => -2,
+                            (true, false) => -1,
+                            (false, true) => 2,
+                            (false, false) => 1,
                         }
                     }
                 })
@@ -343,25 +375,25 @@ impl Game for Sheepshead {
             .map(|i| {
                 if i == picker {
                     match (team_wins, schneider) {
-                        (true,  true)  =>  4,
-                        (true,  false) =>  2,
-                        (false, true)  => -4,
+                        (true, true) => 4,
+                        (true, false) => 2,
+                        (false, true) => -4,
                         (false, false) => -2,
                     }
                 } else if i == partner_seat {
                     match (team_wins, schneider) {
-                        (true,  true)  =>  2,
-                        (true,  false) =>  1,
-                        (false, true)  => -2,
+                        (true, true) => 2,
+                        (true, false) => 1,
+                        (false, true) => -2,
                         (false, false) => -1,
                     }
                 } else {
                     // defender
                     match (team_wins, schneider) {
-                        (true,  true)  => -2,
-                        (true,  false) => -1,
-                        (false, true)  =>  2,
-                        (false, false) =>  1,
+                        (true, true) => -2,
+                        (true, false) => -1,
+                        (false, true) => 2,
+                        (false, false) => 1,
                     }
                 }
             })
@@ -382,9 +414,9 @@ fn callable_suits(hand: &[Card]) -> Vec<Suit> {
         .copied()
         .filter(|&suit| {
             let has_ace = hand.contains(&Card::new(suit, Rank::Ace));
-            let has_other = hand.iter().any(|c| {
-                c.suit == suit && c.rank != Rank::Ace && trump_strength(*c).is_none()
-            });
+            let has_other = hand
+                .iter()
+                .any(|c| c.suit == suit && c.rank != Rank::Ace && trump_strength(*c).is_none());
             !has_ace && has_other
         })
         .collect()
@@ -415,31 +447,53 @@ impl Sheepshead {
                 let (_, blind) = state.extra_piles.remove(blind_pos);
                 state.hands[seat].extend(blind);
 
-                state.meta["picker"] = serde_json::json!(seat);
-                state.meta["sub_phase"] = serde_json::json!("burying");
+                if let Some(m) = sheepshead_meta_mut(state) {
+                    m.picker = Some(seat);
+                    m.sub_phase = "burying".into();
+                }
                 // current_player stays as `seat` — they must now bury 2 cards
 
                 let payload = serde_json::json!({ "picker": seat, "sub_phase": "burying" });
-                Ok(BidResult { phase_complete: false, hand_updated_seat: Some(seat), broadcast_payload: Some(payload) })
+                Ok(BidResult {
+                    phase_complete: false,
+                    hand_updated_seat: Some(seat),
+                    broadcast_payload: Some(payload),
+                })
             }
 
             "pass" => {
-                let passed = state.meta["passed"].as_u64().unwrap_or(0) as usize + 1;
-                state.meta["passed"] = serde_json::json!(passed);
+                let passed = {
+                    let m = sheepshead_meta_mut(state)
+                        .ok_or_else(|| "sheepshead meta missing".to_string())?;
+                    m.passed += 1;
+                    m.passed
+                };
 
                 if passed >= state.player_count {
                     // All five players passed → leaster
-                    state.meta["leaster"] = serde_json::json!(true);
+                    if let Some(m) = sheepshead_meta_mut(state) {
+                        m.leaster = true;
+                    }
                     state.phase = GamePhase::Playing;
                     state.current_player = (state.dealer + 1) % state.player_count;
-                    Ok(BidResult { phase_complete: true, hand_updated_seat: None, broadcast_payload: None })
+                    Ok(BidResult {
+                        phase_complete: true,
+                        hand_updated_seat: None,
+                        broadcast_payload: None,
+                    })
                 } else {
                     state.current_player = (state.dealer + 1 + passed) % state.player_count;
-                    Ok(BidResult { phase_complete: false, hand_updated_seat: None, broadcast_payload: None })
+                    Ok(BidResult {
+                        phase_complete: false,
+                        hand_updated_seat: None,
+                        broadcast_payload: None,
+                    })
                 }
             }
 
-            _ => Err(format!("unknown picking action '{action}'; expected 'pick' or 'pass'")),
+            _ => Err(format!(
+                "unknown picking action '{action}'; expected 'pick' or 'pass'"
+            )),
         }
     }
 
@@ -450,23 +504,27 @@ impl Sheepshead {
         action: &str,
         value: &serde_json::Value,
     ) -> Result<BidResult, String> {
-        let picker = state.meta["picker"]
-            .as_u64()
-            .ok_or_else(|| "picker not set".to_string())?
-            as usize;
+        let picker = sheepshead_meta(state)
+            .and_then(|m| m.picker)
+            .ok_or_else(|| "picker not set".to_string())?;
 
         if seat != picker {
             return Err(format!("only the picker (player {picker}) can bury cards"));
         }
         if action != "bury" {
-            return Err(format!("expected 'bury' action during burying phase, got '{action}'"));
+            return Err(format!(
+                "expected 'bury' action during burying phase, got '{action}'"
+            ));
         }
 
         let cards_arr = value["cards"]
             .as_array()
             .ok_or("'cards' must be an array of exactly 2 cards")?;
         if cards_arr.len() != 2 {
-            return Err(format!("must bury exactly 2 cards, got {}", cards_arr.len()));
+            return Err(format!(
+                "must bury exactly 2 cards, got {}",
+                cards_arr.len()
+            ));
         }
 
         let mut bury: Vec<Card> = Vec::with_capacity(2);
@@ -491,26 +549,24 @@ impl Sheepshead {
             state.hands[seat].remove(pos);
         }
 
-        state.meta["buried"] = serde_json::to_value(&bury).unwrap();
-
         // Compute which fail aces the picker can legally call
         let suits = callable_suits(&state.hands[seat]);
-        let suits_json: Vec<&str> = suits.iter().map(|s| match s {
-            Suit::Clubs    => "clubs",
-            Suit::Spades   => "spades",
-            Suit::Hearts   => "hearts",
-            Suit::Diamonds => "diamonds",
-        }).collect();
-        state.meta["callable_suits"] = serde_json::json!(suits_json);
-        state.meta["sub_phase"]      = serde_json::json!("calling");
+        let suits_strs: Vec<String> = suits.iter().map(|s| s.as_str().to_string()).collect();
 
+        if let Some(m) = sheepshead_meta_mut(state) {
+            m.buried = bury.clone();
+            m.callable_suits = suits_strs.clone();
+            m.sub_phase = "calling".into();
+        }
+
+        let suits_json: Vec<&str> = suits_strs.iter().map(|s| s.as_str()).collect();
         let payload = serde_json::json!({
             "sub_phase":      "calling",
             "callable_suits": suits_json
         });
 
         Ok(BidResult {
-            phase_complete:    false,
+            phase_complete: false,
             hand_updated_seat: Some(seat),
             broadcast_payload: Some(payload),
         })
@@ -523,42 +579,56 @@ impl Sheepshead {
         action: &str,
         value: &serde_json::Value,
     ) -> Result<BidResult, String> {
-        let picker = state.meta["picker"]
-            .as_u64()
-            .ok_or_else(|| "picker not set".to_string())?
-            as usize;
+        let picker = sheepshead_meta(state)
+            .and_then(|m| m.picker)
+            .ok_or_else(|| "picker not set".to_string())?;
         if seat != picker {
-            return Err(format!("only the picker (player {picker}) can call a partner"));
+            return Err(format!(
+                "only the picker (player {picker}) can call a partner"
+            ));
         }
 
         match action {
             "go_alone" => {
-                state.meta["going_alone"] = serde_json::json!(true);
-                state.meta["called_suit"] = serde_json::Value::Null;
+                if let Some(m) = sheepshead_meta_mut(state) {
+                    m.going_alone = true;
+                    m.called_suit = None;
+                }
             }
             "call" => {
                 let suit_str = value["suit"].as_str().ok_or("missing 'suit' field")?;
-                let callable = state.meta["callable_suits"]
-                    .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
+                let callable: Vec<String> = sheepshead_meta(state)
+                    .map(|m| m.callable_suits.clone())
                     .unwrap_or_default();
-                if !callable.contains(&suit_str) {
+                if !callable.iter().any(|s| s == suit_str) {
                     return Err(format!(
                         "suit '{suit_str}' is not callable; callable: {}",
                         callable.join(", ")
                     ));
                 }
-                state.meta["called_suit"] = serde_json::json!(suit_str);
-                state.meta["going_alone"] = serde_json::json!(false);
+                if let Some(m) = sheepshead_meta_mut(state) {
+                    m.called_suit = Some(suit_str.to_string());
+                    m.going_alone = false;
+                }
             }
-            _ => return Err(format!("unknown calling action '{action}'; expected 'call' or 'go_alone'")),
+            _ => {
+                return Err(format!(
+                    "unknown calling action '{action}'; expected 'call' or 'go_alone'"
+                ));
+            }
         }
 
-        state.meta["sub_phase"] = serde_json::json!("done");
+        if let Some(m) = sheepshead_meta_mut(state) {
+            m.sub_phase = "done".into();
+        }
         state.phase = GamePhase::Playing;
         state.current_player = (state.dealer + 1) % state.player_count;
 
-        Ok(BidResult { phase_complete: true, hand_updated_seat: None, broadcast_payload: None })
+        Ok(BidResult {
+            phase_complete: true,
+            hand_updated_seat: None,
+            broadcast_payload: None,
+        })
     }
 }
 
@@ -570,6 +640,7 @@ impl Sheepshead {
 mod tests {
     use super::*;
     use crate::engine::PlayResult;
+    use crate::engine::meta::SheepsheadMeta;
     use uuid::Uuid;
 
     // ── helpers ──────────────────────────────────────────────────────────────
@@ -589,6 +660,30 @@ mod tests {
         GameState::new(Uuid::nil(), "sheepshead".into(), 5, 0)
     }
 
+    fn make_sheepshead_meta(
+        picker: Option<usize>,
+        sub_phase: &str,
+        passed: usize,
+        going_alone: bool,
+        called_suit: Option<&str>,
+        partner: Option<usize>,
+        leaster: bool,
+        buried: Vec<Card>,
+        callable_suits: Vec<String>,
+    ) -> GameMeta {
+        GameMeta::Sheepshead(SheepsheadMeta {
+            picker,
+            sub_phase: sub_phase.into(),
+            passed,
+            leaster,
+            buried,
+            callable_suits,
+            called_suit: called_suit.map(|s| s.to_string()),
+            going_alone,
+            partner,
+        })
+    }
+
     // ── deck & deal ──────────────────────────────────────────────────────────
 
     #[test]
@@ -598,7 +693,11 @@ mod tests {
 
     #[test]
     fn total_points_is_120() {
-        let total: u8 = Sheepshead.build_deck().iter().map(|c| Sheepshead.card_points(*c)).sum();
+        let total: u8 = Sheepshead
+            .build_deck()
+            .iter()
+            .map(|c| Sheepshead.card_points(*c))
+            .sum();
         assert_eq!(total, 120);
     }
 
@@ -608,7 +707,11 @@ mod tests {
         for hand in &result.hands {
             assert_eq!(hand.len(), 6);
         }
-        let blind = result.extra_piles.iter().find(|(n, _)| n == "blind").unwrap();
+        let blind = result
+            .extra_piles
+            .iter()
+            .find(|(n, _)| n == "blind")
+            .unwrap();
         assert_eq!(blind.1.len(), 2);
     }
 
@@ -651,17 +754,19 @@ mod tests {
         assert_eq!(r.hand_updated_seat, Some(1));
         assert_eq!(state.hands[1].len(), 6 + blind_count); // 8 cards
         assert!(state.extra_piles.iter().all(|(n, _)| n != "blind")); // blind gone
-        assert_eq!(state.meta["picker"], serde_json::json!(1));
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.picker == Some(1)));
         assert_eq!(state.current_player, 1); // still picker's turn to bury
     }
 
     #[test]
     fn pass_advances_to_next_player() {
         let mut state = dealt_state(); // current_player=1
-        let r = Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pass"})).unwrap();
+        let r = Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pass"}))
+            .unwrap();
         assert!(!r.phase_complete);
         assert_eq!(state.current_player, 2);
-        assert_eq!(state.meta["passed"], serde_json::json!(1));
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.passed == 1));
     }
 
     #[test]
@@ -676,10 +781,12 @@ mod tests {
         let mut state = dealt_state(); // dealer=0, current_player=1
         for player in 1..=5 {
             let seat = if player <= 4 { player } else { 0 };
-            Sheepshead.apply_bid(&mut state, seat, &serde_json::json!({"action":"pass"})).unwrap();
+            Sheepshead
+                .apply_bid(&mut state, seat, &serde_json::json!({"action":"pass"}))
+                .unwrap();
         }
         assert_eq!(state.phase, GamePhase::Playing);
-        assert_eq!(state.meta["leaster"], serde_json::json!(true));
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.leaster));
     }
 
     // ── burying sub-phase ────────────────────────────────────────────────────
@@ -687,7 +794,9 @@ mod tests {
     #[test]
     fn bury_removes_cards_and_transitions_to_calling() {
         let mut state = dealt_state();
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
 
         let card1 = state.hands[1][0];
         let card2 = state.hands[1][1];
@@ -701,14 +810,16 @@ mod tests {
         assert_eq!(r.hand_updated_seat, Some(1));
         assert_eq!(state.hands[1].len(), 6); // back to 6 after bury
         assert_eq!(state.phase, GamePhase::Bidding);
-        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
-        assert_eq!(state.meta["buried"].as_array().unwrap().len(), 2);
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.sub_phase == "calling"));
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.buried.len() == 2));
     }
 
     #[test]
     fn cannot_bury_card_not_in_hand() {
         let mut state = dealt_state();
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
 
         // player 2's first card (not in player 1's hand)
         let other_card = state.hands[2][0];
@@ -724,7 +835,9 @@ mod tests {
     #[test]
     fn cannot_bury_same_card_twice() {
         let mut state = dealt_state();
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
         let card = state.hands[1][0];
         let err = Sheepshead.apply_bid(
             &mut state,
@@ -737,7 +850,9 @@ mod tests {
     #[test]
     fn non_picker_cannot_bury() {
         let mut state = dealt_state();
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
         let c1 = state.hands[2][0];
         let c2 = state.hands[2][1];
         let err = Sheepshead.apply_bid(
@@ -753,11 +868,17 @@ mod tests {
     /// Advance through bidding and reach Playing phase with player 1 as picker.
     fn playing_state() -> GameState {
         let mut state = dealt_state();
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
         let c1 = state.hands[1][0];
         let c2 = state.hands[1][1];
         Sheepshead
-            .apply_bid(&mut state, 1, &serde_json::json!({"action":"bury","cards":[c1,c2]}))
+            .apply_bid(
+                &mut state,
+                1,
+                &serde_json::json!({"action":"bury","cards":[c1,c2]}),
+            )
             .unwrap();
         // Must now call or go_alone before reaching Playing phase
         Sheepshead
@@ -773,7 +894,10 @@ mod tests {
         for _ in 0..5 {
             let player = state.current_player;
             let hand = state.hands[player].clone();
-            let trick = state.current_trick.as_ref().cloned()
+            let trick = state
+                .current_trick
+                .as_ref()
+                .cloned()
                 .unwrap_or_else(|| Trick::new(player));
             let legal = Sheepshead.legal_plays(&hand, &trick, state);
             result = Sheepshead.apply_play(state, player, legal[0]).unwrap();
@@ -810,7 +934,9 @@ mod tests {
     fn must_follow_suit_when_possible() {
         let mut state = playing_state();
         // Player 1 leads a plain-suit card (if they have one)
-        let led = state.hands[1].iter().copied()
+        let led = state.hands[1]
+            .iter()
+            .copied()
             .find(|c| Sheepshead.effective_suit(*c, &state) != EffectiveSuit::Trump);
         let Some(led_card) = led else { return }; // skip if hand is all trump
 
@@ -819,10 +945,13 @@ mod tests {
         let next = state.current_player;
 
         // If next player has a card of the led suit, playing off-suit must fail
-        let has_suit = state.hands[next].iter()
+        let has_suit = state.hands[next]
+            .iter()
             .any(|c| Sheepshead.effective_suit(*c, &state) == led_suit);
         if has_suit {
-            let off_suit = state.hands[next].iter().copied()
+            let off_suit = state.hands[next]
+                .iter()
+                .copied()
                 .find(|c| Sheepshead.effective_suit(*c, &state) != led_suit);
             if let Some(bad) = off_suit {
                 assert!(Sheepshead.apply_play(&mut state, next, bad).is_err());
@@ -836,9 +965,11 @@ mod tests {
         let result = play_full_trick(&mut state);
         let (winner, _points) = match result {
             PlayResult::TrickComplete { winner, points } => (winner, points),
-            PlayResult::GameOver { last_trick_winner, last_trick_points, .. } => {
-                (last_trick_winner, last_trick_points)
-            }
+            PlayResult::GameOver {
+                last_trick_winner,
+                last_trick_points,
+                ..
+            } => (last_trick_winner, last_trick_points),
             PlayResult::Continuing => panic!("expected trick to complete"),
         };
         assert_eq!(state.completed_tricks.len(), 1);
@@ -852,7 +983,9 @@ mod tests {
         let result = play_full_trick(&mut state);
         let points = match result {
             PlayResult::TrickComplete { points, .. } => points,
-            PlayResult::GameOver { last_trick_points, .. } => last_trick_points,
+            PlayResult::GameOver {
+                last_trick_points, ..
+            } => last_trick_points,
             _ => panic!("expected trick completion"),
         };
         let played: u8 = state.completed_tricks[0]
@@ -881,17 +1014,20 @@ mod tests {
         // After a full game, raw point totals across all tricks must equal 120.
         // Buried cards are NOT in completed_tricks, so raw trick points = 120 - buried.
         let mut state = playing_state();
-        let buried_pts: u8 = state.meta["buried"]
-            .as_array().unwrap()
-            .iter()
-            .filter_map(|v| serde_json::from_value::<Card>(v.clone()).ok())
-            .map(|c| Sheepshead.card_points(c))
-            .sum();
+        let buried_pts: u8 = if let GameMeta::Sheepshead(ref m) = state.meta {
+            m.buried.iter().map(|c| Sheepshead.card_points(*c)).sum()
+        } else {
+            0
+        };
 
-        for _ in 0..6 { play_full_trick(&mut state); }
+        for _ in 0..6 {
+            play_full_trick(&mut state);
+        }
 
         let tbp = state.tricks_by_player();
-        let trick_total: u8 = tbp.iter().flatten()
+        let trick_total: u8 = tbp
+            .iter()
+            .flatten()
             .flat_map(|t| t.plays.iter().map(|(_, c)| Sheepshead.card_points(*c)))
             .sum();
         assert_eq!(trick_total + buried_pts, 120);
@@ -899,7 +1035,7 @@ mod tests {
 
     // ── score_game helpers & tests ───────────────────────────────────────────
 
-    fn make_state_with_meta(meta: serde_json::Value) -> GameState {
+    fn make_state_with_meta(meta: GameMeta) -> GameState {
         let mut state = GameState::new(uuid::Uuid::nil(), "sheepshead".into(), 5, 0);
         state.meta = meta;
         state
@@ -915,184 +1051,293 @@ mod tests {
 
     #[test]
     fn going_alone_normal_win() {
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "sub_phase": "done", "passed": 0,
-            "going_alone": true, "called_suit": null, "partner": null,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            true,
+            None,
+            None,
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),     // 11
-            (1, Card::new(Suit::Clubs, Rank::Ten)),     // 10
-            (1, Card::new(Suit::Spades, Rank::Ace)),    // 11
-            (1, Card::new(Suit::Spades, Rank::Ten)),    // 10
-            (1, Card::new(Suit::Hearts, Rank::Ace)),    // 11
-        ]));
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Hearts, Rank::Ten)),    // 10
-            (0, Card::new(Suit::Clubs, Rank::Seven)),   // 0
-            (2, Card::new(Suit::Clubs, Rank::Eight)),   // 0
-            (3, Card::new(Suit::Clubs, Rank::Nine)),    // 0
-            (4, Card::new(Suit::Spades, Rank::Seven)),  // 0
-        ]));
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),  // 11
+                (1, Card::new(Suit::Clubs, Rank::Ten)),  // 10
+                (1, Card::new(Suit::Spades, Rank::Ace)), // 11
+                (1, Card::new(Suit::Spades, Rank::Ten)), // 10
+                (1, Card::new(Suit::Hearts, Rank::Ace)), // 11
+            ],
+        ));
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Hearts, Rank::Ten)),   // 10
+                (0, Card::new(Suit::Clubs, Rank::Seven)),  // 0
+                (2, Card::new(Suit::Clubs, Rank::Eight)),  // 0
+                (3, Card::new(Suit::Clubs, Rank::Nine)),   // 0
+                (4, Card::new(Suit::Spades, Rank::Seven)), // 0
+            ],
+        ));
         // Picker: 53+10=63; defenders: 120-63=57 (not schneider since >30)
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], 4, "picker wins alone: +4");
-        assert_eq!(scores[0], -1); assert_eq!(scores[2], -1);
-        assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores[0], -1);
+        assert_eq!(scores[2], -1);
+        assert_eq!(scores[3], -1);
+        assert_eq!(scores[4], -1);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn going_alone_schneider_win() {
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "sub_phase": "done", "passed": 0,
-            "going_alone": true, "called_suit": null, "partner": null,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            true,
+            None,
+            None,
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
-            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
-            (1, Card::new(Suit::Hearts, Rank::Ace)),
-        ]));  // 53
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Hearts, Rank::Ten)),    (1, Card::new(Suit::Diamonds, Rank::Ace)),
-            (1, Card::new(Suit::Diamonds, Rank::Ten)),  (1, Card::new(Suit::Clubs, Rank::King)),
-            (1, Card::new(Suit::Spades, Rank::King)),
-        ]));  // 10+11+10+4+4 = 39 → total 92; defenders get 28 ≤ 30 → schneider
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),
+                (1, Card::new(Suit::Clubs, Rank::Ten)),
+                (1, Card::new(Suit::Spades, Rank::Ace)),
+                (1, Card::new(Suit::Spades, Rank::Ten)),
+                (1, Card::new(Suit::Hearts, Rank::Ace)),
+            ],
+        )); // 53
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Hearts, Rank::Ten)),
+                (1, Card::new(Suit::Diamonds, Rank::Ace)),
+                (1, Card::new(Suit::Diamonds, Rank::Ten)),
+                (1, Card::new(Suit::Clubs, Rank::King)),
+                (1, Card::new(Suit::Spades, Rank::King)),
+            ],
+        )); // 10+11+10+4+4 = 39 → total 92; defenders get 28 ≤ 30 → schneider
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], 8, "picker schneider win alone: +8");
-        assert_eq!(scores[0], -2); assert_eq!(scores[2], -2);
-        assert_eq!(scores[3], -2); assert_eq!(scores[4], -2);
+        assert_eq!(scores[0], -2);
+        assert_eq!(scores[2], -2);
+        assert_eq!(scores[3], -2);
+        assert_eq!(scores[4], -2);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn going_alone_normal_loss() {
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "sub_phase": "done", "passed": 0,
-            "going_alone": true, "called_suit": null, "partner": null,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            true,
+            None,
+            None,
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
-            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
-            (1, Card::new(Suit::Hearts, Rank::Seven)),
-        ])); // 42
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),
+                (1, Card::new(Suit::Clubs, Rank::Ten)),
+                (1, Card::new(Suit::Spades, Rank::Ace)),
+                (1, Card::new(Suit::Spades, Rank::Ten)),
+                (1, Card::new(Suit::Hearts, Rank::Seven)),
+            ],
+        )); // 42
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], -4, "picker loses alone: -4");
-        assert_eq!(scores[0], 1); assert_eq!(scores[2], 1);
-        assert_eq!(scores[3], 1); assert_eq!(scores[4], 1);
+        assert_eq!(scores[0], 1);
+        assert_eq!(scores[2], 1);
+        assert_eq!(scores[3], 1);
+        assert_eq!(scores[4], 1);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn partner_2v3_normal_win() {
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
-            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            false,
+            Some("clubs"),
+            Some(2),
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)), (1, Card::new(Suit::Clubs, Rank::Ten)),
-            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
-            (1, Card::new(Suit::Hearts, Rank::Seven)),
-        ])); // 42
-        tbp[2].push(make_trick(2, vec![
-            (2, Card::new(Suit::Hearts, Rank::Ace)), (2, Card::new(Suit::Hearts, Rank::Ten)),
-        ])); // 21
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),
+                (1, Card::new(Suit::Clubs, Rank::Ten)),
+                (1, Card::new(Suit::Spades, Rank::Ace)),
+                (1, Card::new(Suit::Spades, Rank::Ten)),
+                (1, Card::new(Suit::Hearts, Rank::Seven)),
+            ],
+        )); // 42
+        tbp[2].push(make_trick(
+            2,
+            vec![
+                (2, Card::new(Suit::Hearts, Rank::Ace)),
+                (2, Card::new(Suit::Hearts, Rank::Ten)),
+            ],
+        )); // 21
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], 2, "picker wins 2v3: +2");
         assert_eq!(scores[2], 1, "partner wins 2v3: +1");
-        assert_eq!(scores[0], -1); assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores[0], -1);
+        assert_eq!(scores[3], -1);
+        assert_eq!(scores[4], -1);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn partner_2v3_normal_loss() {
-        // Team total must be >30 (no schneider) but ≤60 (loss).
-        // picker(1) wins a trick worth 22 pts, partner(2) wins a trick worth 22 pts → team = 44.
-        // 44 > 30 (no schneider), 44 ≤ 60 (loss).
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
-            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            false,
+            Some("clubs"),
+            Some(2),
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
         // picker gets 11+11=22 pts
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),    // 11
-            (1, Card::new(Suit::Spades, Rank::Ace)),   // 11
-            (0, Card::new(Suit::Hearts, Rank::Seven)), // 0
-            (3, Card::new(Suit::Hearts, Rank::Eight)), // 0
-            (4, Card::new(Suit::Hearts, Rank::Nine)),  // 0
-        ])); // picker: 22
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),    // 11
+                (1, Card::new(Suit::Spades, Rank::Ace)),   // 11
+                (0, Card::new(Suit::Hearts, Rank::Seven)), // 0
+                (3, Card::new(Suit::Hearts, Rank::Eight)), // 0
+                (4, Card::new(Suit::Hearts, Rank::Nine)),  // 0
+            ],
+        )); // picker: 22
         // partner gets 11+11=22 pts
-        tbp[2].push(make_trick(2, vec![
-            (2, Card::new(Suit::Hearts, Rank::Ace)),   // 11
-            (2, Card::new(Suit::Spades, Rank::King)),  // 4
-            (0, Card::new(Suit::Clubs, Rank::Seven)),  // 0
-            (3, Card::new(Suit::Clubs, Rank::Eight)),  // 0
-            (4, Card::new(Suit::Clubs, Rank::Nine)),   // 0
-        ])); // partner: 15 → team = 22+15 = 37 > 30, ≤ 60 → normal loss
+        tbp[2].push(make_trick(
+            2,
+            vec![
+                (2, Card::new(Suit::Hearts, Rank::Ace)),  // 11
+                (2, Card::new(Suit::Spades, Rank::King)), // 4
+                (0, Card::new(Suit::Clubs, Rank::Seven)), // 0
+                (3, Card::new(Suit::Clubs, Rank::Eight)), // 0
+                (4, Card::new(Suit::Clubs, Rank::Nine)),  // 0
+            ],
+        )); // partner: 15 → team = 22+15 = 37 > 30, ≤ 60 → normal loss
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], -2, "picker loses 2v3: -2");
         assert_eq!(scores[2], -1, "partner loses 2v3: -1");
-        assert_eq!(scores[0], 1); assert_eq!(scores[3], 1); assert_eq!(scores[4], 1);
+        assert_eq!(scores[0], 1);
+        assert_eq!(scores[3], 1);
+        assert_eq!(scores[4], 1);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn partner_2v3_schneider_win() {
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "partner": 2_u64, "going_alone": false,
-            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            false,
+            Some("clubs"),
+            Some(2),
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
-            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
-            (1, Card::new(Suit::Hearts, Rank::Ace)),
-        ])); // 53
-        tbp[2].push(make_trick(2, vec![
-            (2, Card::new(Suit::Hearts, Rank::Ten)),   (2, Card::new(Suit::Diamonds, Rank::Ace)),
-            (2, Card::new(Suit::Diamonds, Rank::Ten)), (2, Card::new(Suit::Clubs, Rank::King)),
-            (2, Card::new(Suit::Spades, Rank::King)),
-        ])); // 39 → team: 92; defenders: 28 ≤ 30 → schneider
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),
+                (1, Card::new(Suit::Clubs, Rank::Ten)),
+                (1, Card::new(Suit::Spades, Rank::Ace)),
+                (1, Card::new(Suit::Spades, Rank::Ten)),
+                (1, Card::new(Suit::Hearts, Rank::Ace)),
+            ],
+        )); // 53
+        tbp[2].push(make_trick(
+            2,
+            vec![
+                (2, Card::new(Suit::Hearts, Rank::Ten)),
+                (2, Card::new(Suit::Diamonds, Rank::Ace)),
+                (2, Card::new(Suit::Diamonds, Rank::Ten)),
+                (2, Card::new(Suit::Clubs, Rank::King)),
+                (2, Card::new(Suit::Spades, Rank::King)),
+            ],
+        )); // 39 → team: 92; defenders: 28 ≤ 30 → schneider
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], 4, "picker schneider win 2v3: +4");
         assert_eq!(scores[2], 2, "partner schneider win 2v3: +2");
-        assert_eq!(scores[0], -2); assert_eq!(scores[3], -2); assert_eq!(scores[4], -2);
+        assert_eq!(scores[0], -2);
+        assert_eq!(scores[3], -2);
+        assert_eq!(scores[4], -2);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
     #[test]
     fn partner_never_revealed_scores_as_going_alone() {
-        // partner is null (ace never played) → treat as going alone
-        let state = make_state_with_meta(serde_json::json!({
-            "picker": 1_u64, "partner": null, "going_alone": false,
-            "called_suit": "clubs", "sub_phase": "done", "passed": 0,
-            "buried": [], "leaster": false, "callable_suits": []
-        }));
+        // partner is None (ace never played) → treat as going alone
+        let state = make_state_with_meta(make_sheepshead_meta(
+            Some(1),
+            "done",
+            0,
+            false,
+            Some("clubs"),
+            None,
+            false,
+            vec![],
+            vec![],
+        ));
         let mut tbp: Vec<Vec<Trick>> = vec![Vec::new(); 5];
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Clubs, Rank::Ace)),  (1, Card::new(Suit::Clubs, Rank::Ten)),
-            (1, Card::new(Suit::Spades, Rank::Ace)), (1, Card::new(Suit::Spades, Rank::Ten)),
-            (1, Card::new(Suit::Hearts, Rank::Ace)),
-        ])); // 53
-        tbp[1].push(make_trick(1, vec![
-            (1, Card::new(Suit::Hearts, Rank::Ten)), (1, Card::new(Suit::Diamonds, Rank::Ace)),
-            (0, Card::new(Suit::Clubs, Rank::Seven)), (2, Card::new(Suit::Clubs, Rank::Eight)),
-            (3, Card::new(Suit::Clubs, Rank::Nine)),
-        ])); // 10+11=21 → picker total 74 > 60; defenders 46 > 30 → no schneider
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Clubs, Rank::Ace)),
+                (1, Card::new(Suit::Clubs, Rank::Ten)),
+                (1, Card::new(Suit::Spades, Rank::Ace)),
+                (1, Card::new(Suit::Spades, Rank::Ten)),
+                (1, Card::new(Suit::Hearts, Rank::Ace)),
+            ],
+        )); // 53
+        tbp[1].push(make_trick(
+            1,
+            vec![
+                (1, Card::new(Suit::Hearts, Rank::Ten)),
+                (1, Card::new(Suit::Diamonds, Rank::Ace)),
+                (0, Card::new(Suit::Clubs, Rank::Seven)),
+                (2, Card::new(Suit::Clubs, Rank::Eight)),
+                (3, Card::new(Suit::Clubs, Rank::Nine)),
+            ],
+        )); // 10+11=21 → picker total 74 > 60; defenders 46 > 30 → no schneider
         let scores = Sheepshead.score_game(&tbp, &state);
         assert_eq!(scores[1], 4, "partner null → going alone win: +4");
-        assert_eq!(scores[0], -1); assert_eq!(scores[2], -1);
-        assert_eq!(scores[3], -1); assert_eq!(scores[4], -1);
+        assert_eq!(scores[0], -1);
+        assert_eq!(scores[2], -1);
+        assert_eq!(scores[3], -1);
+        assert_eq!(scores[4], -1);
         assert_eq!(scores.iter().sum::<i32>(), 0);
     }
 
@@ -1110,17 +1355,36 @@ mod tests {
     fn all_queens_and_jacks_are_trump() {
         let state = dummy_state();
         for suit in [Suit::Clubs, Suit::Spades, Suit::Hearts, Suit::Diamonds] {
-            assert!(Sheepshead.trump_rank(Card::new(suit, Rank::Queen), &state).is_some());
-            assert!(Sheepshead.trump_rank(Card::new(suit, Rank::Jack), &state).is_some());
+            assert!(
+                Sheepshead
+                    .trump_rank(Card::new(suit, Rank::Queen), &state)
+                    .is_some()
+            );
+            assert!(
+                Sheepshead
+                    .trump_rank(Card::new(suit, Rank::Jack), &state)
+                    .is_some()
+            );
         }
     }
 
     #[test]
     fn non_diamond_plain_cards_are_not_trump() {
         let state = dummy_state();
-        for rank in [Rank::Ace, Rank::Ten, Rank::King, Rank::Nine, Rank::Eight, Rank::Seven] {
+        for rank in [
+            Rank::Ace,
+            Rank::Ten,
+            Rank::King,
+            Rank::Nine,
+            Rank::Eight,
+            Rank::Seven,
+        ] {
             for suit in [Suit::Clubs, Suit::Spades, Suit::Hearts] {
-                assert!(Sheepshead.trump_rank(Card::new(suit, rank), &state).is_none());
+                assert!(
+                    Sheepshead
+                        .trump_rank(Card::new(suit, rank), &state)
+                        .is_none()
+                );
             }
         }
     }
@@ -1129,9 +1393,11 @@ mod tests {
     fn trick_winner_trump_beats_led_suit() {
         let state = dummy_state();
         let mut trick = Trick::new(0);
-        trick.plays.push((0, Card::new(Suit::Clubs, Rank::Ace)));      // led ♣A
-        trick.plays.push((1, Card::new(Suit::Clubs, Rank::Seven)));    // ♣7
-        trick.plays.push((2, Card::new(Suit::Diamonds, Rank::Seven))); // 7♦ = lowest trump
+        trick.plays.push((0, Card::new(Suit::Clubs, Rank::Ace))); // led ♣A
+        trick.plays.push((1, Card::new(Suit::Clubs, Rank::Seven))); // ♣7
+        trick
+            .plays
+            .push((2, Card::new(Suit::Diamonds, Rank::Seven))); // 7♦ = lowest trump
         assert_eq!(Sheepshead.trick_winner(&trick, &state), 2);
     }
 
@@ -1141,15 +1407,24 @@ mod tests {
     fn calling_state() -> (GameState, usize) {
         let mut state = dealt_state();
         // player 1 picks (dealer=0, first player=1)
-        Sheepshead.apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"})).unwrap();
+        Sheepshead
+            .apply_bid(&mut state, 1, &serde_json::json!({"action":"pick"}))
+            .unwrap();
         let c1 = state.hands[1][0];
         let c2 = state.hands[1][1];
         let r = Sheepshead
-            .apply_bid(&mut state, 1, &serde_json::json!({"action":"bury","cards":[c1,c2]}))
+            .apply_bid(
+                &mut state,
+                1,
+                &serde_json::json!({"action":"bury","cards":[c1,c2]}),
+            )
             .unwrap();
         // After burying, should be in calling sub-phase (NOT playing yet)
-        assert!(!r.phase_complete, "bury should NOT transition to Playing directly");
-        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
+        assert!(
+            !r.phase_complete,
+            "bury should NOT transition to Playing directly"
+        );
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.sub_phase == "calling"));
         (state, 1) // (state, picker_seat)
     }
 
@@ -1157,51 +1432,77 @@ mod tests {
     fn bury_transitions_to_calling_not_playing() {
         let (state, _) = calling_state();
         assert_eq!(state.phase, GamePhase::Bidding);
-        assert_eq!(state.meta["sub_phase"].as_str(), Some("calling"));
-        assert!(state.meta["callable_suits"].is_array());
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.sub_phase == "calling"));
+        assert!(
+            matches!(&state.meta, GameMeta::Sheepshead(m) if !m.callable_suits.is_empty() || m.callable_suits.is_empty())
+        );
     }
 
     #[test]
     fn go_alone_transitions_to_playing() {
         let (mut state, picker) = calling_state();
         let r = Sheepshead
-            .apply_bid(&mut state, picker, &serde_json::json!({"action":"go_alone"}))
+            .apply_bid(
+                &mut state,
+                picker,
+                &serde_json::json!({"action":"go_alone"}),
+            )
             .unwrap();
         assert!(r.phase_complete);
         assert_eq!(state.phase, GamePhase::Playing);
-        assert_eq!(state.meta["going_alone"].as_bool(), Some(true));
-        assert!(state.meta["called_suit"].is_null());
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.going_alone));
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if m.called_suit.is_none()));
     }
 
     #[test]
     fn call_valid_suit_transitions_to_playing() {
         let (mut state, picker) = calling_state();
         // Find a callable suit from meta
-        let suits = state.meta["callable_suits"].as_array().unwrap().clone();
+        let suits: Vec<String> = if let GameMeta::Sheepshead(ref m) = state.meta {
+            m.callable_suits.clone()
+        } else {
+            vec![]
+        };
         if suits.is_empty() {
             // No callable suit means forced go_alone — skip this test
             return;
         }
-        let suit_str = suits[0].as_str().unwrap().to_string();
+        let suit_str = suits[0].clone();
         let r = Sheepshead
-            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}))
+            .apply_bid(
+                &mut state,
+                picker,
+                &serde_json::json!({"action":"call","suit":suit_str}),
+            )
             .unwrap();
         assert!(r.phase_complete);
         assert_eq!(state.phase, GamePhase::Playing);
-        assert_eq!(state.meta["called_suit"].as_str(), Some(suit_str.as_str()));
-        assert_eq!(state.meta["going_alone"].as_bool(), Some(false));
+        assert!(
+            matches!(&state.meta, GameMeta::Sheepshead(m) if m.called_suit.as_deref() == Some(suit_str.as_str()))
+        );
+        assert!(matches!(&state.meta, GameMeta::Sheepshead(m) if !m.going_alone));
     }
 
     #[test]
     fn playing_called_ace_sets_partner_in_meta() {
         // Set up a game where player 1 called a suit (if callable)
         let (mut state, picker) = calling_state();
-        let callable = state.meta["callable_suits"].as_array().unwrap().clone();
-        if callable.is_empty() { return; } // no callable suit — skip
+        let callable: Vec<String> = if let GameMeta::Sheepshead(ref m) = state.meta {
+            m.callable_suits.clone()
+        } else {
+            vec![]
+        };
+        if callable.is_empty() {
+            return;
+        } // no callable suit — skip
 
-        let suit_str = callable[0].as_str().unwrap().to_string();
+        let suit_str = callable[0].clone();
         Sheepshead
-            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}))
+            .apply_bid(
+                &mut state,
+                picker,
+                &serde_json::json!({"action":"call","suit":suit_str}),
+            )
             .unwrap();
         assert_eq!(state.phase, GamePhase::Playing);
 
@@ -1216,9 +1517,8 @@ mod tests {
         // Ensure there's no current trick (partner leads)
         state.current_trick = None;
         Sheepshead.apply_play(&mut state, partner, ace).unwrap();
-        assert_eq!(
-            state.meta["partner"].as_u64(),
-            Some(partner as u64),
+        assert!(
+            matches!(&state.meta, GameMeta::Sheepshead(m) if m.partner == Some(partner)),
             "partner should be set when called ace is played"
         );
     }
@@ -1227,14 +1527,22 @@ mod tests {
     fn call_ace_picker_holds_is_rejected() {
         let (mut state, picker) = calling_state();
         // Find a suit whose ace the picker holds — should be invalid
-        let ace_in_hand = state.hands[picker].iter()
-            .find(|c| c.rank == Rank::Ace && c.suit != Suit::Diamonds
-                    && trump_strength(**c).is_none())
+        let ace_in_hand = state.hands[picker]
+            .iter()
+            .find(|c| {
+                c.rank == Rank::Ace && c.suit != Suit::Diamonds && trump_strength(**c).is_none()
+            })
             .copied();
         let Some(ace) = ace_in_hand else { return }; // skip if no fail aces in hand
         let suit_str = format!("{:?}", ace.suit).to_lowercase();
-        let err = Sheepshead
-            .apply_bid(&mut state, picker, &serde_json::json!({"action":"call","suit":suit_str}));
-        assert!(err.is_err(), "should reject calling an ace the picker holds");
+        let err = Sheepshead.apply_bid(
+            &mut state,
+            picker,
+            &serde_json::json!({"action":"call","suit":suit_str}),
+        );
+        assert!(
+            err.is_err(),
+            "should reject calling an ace the picker holds"
+        );
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::engine::{Card, GameState, Rank, Trick};
 use crate::engine::game::{EffectiveSuit, Game};
+use crate::engine::{Card, GameState, Rank, Trick};
 
 // ---------------------------------------------------------------------------
 // BotState — derived fresh from GameState on every decision
@@ -22,7 +22,9 @@ pub fn build_bot_state(state: &GameState, game: &dyn Game) -> BotState {
     let mut known_voids: HashMap<usize, HashSet<EffectiveSuit>> = HashMap::new();
 
     for trick in &state.completed_tricks {
-        let Some(&(_, led_card)) = trick.plays.first() else { continue };
+        let Some(&(_, led_card)) = trick.plays.first() else {
+            continue;
+        };
         let led_suit = game.effective_suit(led_card, state);
 
         for &(seat, card) in &trick.plays {
@@ -43,7 +45,11 @@ pub fn build_bot_state(state: &GameState, game: &dyn Game) -> BotState {
     // No partner prediction at the generic level (game-specific)
     let predicted_partner = None;
 
-    BotState { played_cards, known_voids, predicted_partner }
+    BotState {
+        played_cards,
+        known_voids,
+        predicted_partner,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +75,10 @@ pub fn trick_points(trick: &Trick, game: &dyn Game) -> u8 {
 /// Winner seat of a partial or complete trick (does not require trick to be full).
 #[allow(dead_code)]
 pub fn current_winner(trick: &Trick, game: &dyn Game, state: &GameState) -> usize {
-    debug_assert!(!trick.plays.is_empty(), "current_winner called on empty trick");
+    debug_assert!(
+        !trick.plays.is_empty(),
+        "current_winner called on empty trick"
+    );
     let mut best = 0usize;
     let mut best_trump = game.trump_rank(trick.plays[0].1, state);
     let led_suit = game.effective_suit(trick.plays[0].1, state);
@@ -96,18 +105,29 @@ pub fn current_winner(trick: &Trick, game: &dyn Game, state: &GameState) -> usiz
 
 /// Lowest trump in `candidates` that beats every play in `trick`. Returns None if none can win.
 #[allow(dead_code)]
-pub fn min_winning_trump(candidates: &[Card], trick: &Trick, game: &dyn Game, state: &GameState) -> Option<Card> {
-    let best_trump_in_trick = trick.plays.iter()
+pub fn min_winning_trump(
+    candidates: &[Card],
+    trick: &Trick,
+    game: &dyn Game,
+    state: &GameState,
+) -> Option<Card> {
+    let best_trump_in_trick = trick
+        .plays
+        .iter()
         .filter_map(|(_, c)| game.trump_rank(*c, state))
         .max();
 
-    let mut winners: Vec<Card> = candidates.iter().filter(|&&c| {
-        match (game.trump_rank(c, state), best_trump_in_trick) {
-            (Some(my), Some(best)) => my > best,
-            (Some(_), None) => true,
-            _ => false,
-        }
-    }).copied().collect();
+    let mut winners: Vec<Card> = candidates
+        .iter()
+        .filter(
+            |&&c| match (game.trump_rank(c, state), best_trump_in_trick) {
+                (Some(my), Some(best)) => my > best,
+                (Some(_), None) => true,
+                _ => false,
+            },
+        )
+        .copied()
+        .collect();
 
     winners.sort_by_key(|c| game.trump_rank(*c, state).unwrap());
     winners.into_iter().next()
@@ -115,7 +135,8 @@ pub fn min_winning_trump(candidates: &[Card], trick: &Trick, game: &dyn Game, st
 
 pub fn lowest_card(cards: &[Card], game: &dyn Game, state: &GameState) -> Card {
     // Prefer lowest non-trump; if none, lowest trump
-    let mut fail: Vec<Card> = cards.iter()
+    let mut fail: Vec<Card> = cards
+        .iter()
         .filter(|c| game.trump_rank(**c, state).is_none())
         .copied()
         .collect();
@@ -130,7 +151,8 @@ pub fn lowest_card(cards: &[Card], game: &dyn Game, state: &GameState) -> Card {
 
 pub fn highest_point_card(cards: &[Card], game: &dyn Game, state: &GameState) -> Card {
     // Prefer highest-point fail card; fall back to highest-point trump
-    let mut fail: Vec<Card> = cards.iter()
+    let mut fail: Vec<Card> = cards
+        .iter()
         .filter(|c| game.trump_rank(**c, state).is_none())
         .copied()
         .collect();
@@ -167,8 +189,12 @@ mod tests {
     use crate::engine::{Card, Rank, Suit, Trick};
     use crate::games::sheepshead::Sheepshead;
 
-    fn make_card(suit: Suit, rank: Rank) -> Card { Card::new(suit, rank) }
-    fn sheepshead() -> Sheepshead { Sheepshead }
+    fn make_card(suit: Suit, rank: Rank) -> Card {
+        Card::new(suit, rank)
+    }
+    fn sheepshead() -> Sheepshead {
+        Sheepshead
+    }
 
     fn state_with_tricks(tricks: Vec<Trick>, player_count: usize) -> GameState {
         use uuid::Uuid;
@@ -183,8 +209,13 @@ mod tests {
         let c1 = make_card(Suit::Clubs, Rank::Ace);
         let c2 = make_card(Suit::Hearts, Rank::Seven);
         let mut trick = Trick::new(0);
-        trick.plays = vec![(0, c1), (1, c2), (2, make_card(Suit::Clubs, Rank::Nine)),
-                           (3, make_card(Suit::Clubs, Rank::Eight)), (4, make_card(Suit::Clubs, Rank::King))];
+        trick.plays = vec![
+            (0, c1),
+            (1, c2),
+            (2, make_card(Suit::Clubs, Rank::Nine)),
+            (3, make_card(Suit::Clubs, Rank::Eight)),
+            (4, make_card(Suit::Clubs, Rank::King)),
+        ];
         trick.winner = Some(0);
         let state = state_with_tricks(vec![trick], 5);
         let bs = build_bot_state(&state, &game);
@@ -198,13 +229,21 @@ mod tests {
         let led = make_card(Suit::Clubs, Rank::Ace);
         let sluff = make_card(Suit::Hearts, Rank::Seven);
         let mut trick = Trick::new(0);
-        trick.plays = vec![(0, led), (1, sluff), (2, make_card(Suit::Clubs, Rank::King)),
-                           (3, make_card(Suit::Clubs, Rank::Nine)), (4, make_card(Suit::Clubs, Rank::Eight))];
+        trick.plays = vec![
+            (0, led),
+            (1, sluff),
+            (2, make_card(Suit::Clubs, Rank::King)),
+            (3, make_card(Suit::Clubs, Rank::Nine)),
+            (4, make_card(Suit::Clubs, Rank::Eight)),
+        ];
         trick.winner = Some(0);
         let state = state_with_tricks(vec![trick], 5);
         let bs = build_bot_state(&state, &game);
         use crate::engine::game::EffectiveSuit;
-        assert!(bs.known_voids.get(&1)
-            .map_or(false, |v| v.contains(&EffectiveSuit::Plain(Suit::Clubs))));
+        assert!(
+            bs.known_voids
+                .get(&1)
+                .map_or(false, |v| v.contains(&EffectiveSuit::Plain(Suit::Clubs)))
+        );
     }
 }

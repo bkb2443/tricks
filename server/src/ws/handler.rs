@@ -1,5 +1,8 @@
 use axum::{
-    extract::{State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -114,20 +117,31 @@ fn route(
 ) -> Option<StateUpdate> {
     match msg {
         // ── Legacy solo path ─────────────────────────────────────────────────
-        ClientMessage::JoinRoom { room_id, game, players, fill_bots } => {
+        ClientMessage::JoinRoom {
+            room_id,
+            game,
+            players,
+            fill_bots,
+        } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let room = match room_id {
-                Some(ref id) => lobby.get_room(&id.to_string()).or_else(|| {
-                    lobby.create_room(game, players, 24).map(|(_, r)| r)
-                })?,
+                Some(ref id) => lobby
+                    .get_room(&id.to_string())
+                    .or_else(|| lobby.create_room(game, players, 24).map(|(_, r)| r))?,
                 None => lobby.create_room(game, players, 24).map(|(_, r)| r)?,
             };
             match room.join(player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
                     let code = room.room_code.clone();
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code: code };
+                    let reply = StateUpdate::JoinedRoom {
+                        room_id: room.id,
+                        seat,
+                        room_code: code,
+                    };
                     if fill_bots {
                         let room_arc = Arc::clone(&room);
                         room_arc.fill_bots();
@@ -136,18 +150,30 @@ fn route(
                     *ctx = Some(PlayerCtx { seat: Some(seat), name: None, ws_id, room, broadcast_rx });
                     Some(reply)
                 }
-                None => Some(StateUpdate::Error { message: "room is full".into() }),
+                None => Some(StateUpdate::Error {
+                    message: "room is full".into(),
+                }),
             }
         }
 
         // ── Multiplayer: create a new private room ────────────────────────────
-        ClientMessage::CreateRoom { name, game, max_hands } => {
+        ClientMessage::CreateRoom {
+            name,
+            game,
+            max_hands,
+        } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let (code, room) = match lobby.create_room(game, 5, 24) {
                 Some(r) => r,
-                None => return Some(StateUpdate::Error { message: "unknown game".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "unknown game".into(),
+                    });
+                }
             };
             if let Some(mh) = max_hands {
                 room.set_max_hands(mh);
@@ -158,20 +184,26 @@ fn route(
                     *ctx = Some(PlayerCtx { seat: Some(seat), name: Some(name), ws_id, room, broadcast_rx });
                     Some(reply)
                 }
-                None => Some(StateUpdate::Error { message: "failed to join room".into() }),
+                None => Some(StateUpdate::Error {
+                    message: "failed to join room".into(),
+                }),
             }
         }
 
         // ── Multiplayer: join existing room by short code ─────────────────────
         ClientMessage::Join { name, room_code } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let room = match lobby.get_room(&room_code) {
                 Some(r) => r,
-                None => return Some(StateUpdate::Error {
-                    message: format!("room '{room_code}' not found"),
-                }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: format!("room '{room_code}' not found"),
+                    });
+                }
             };
             match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
@@ -301,7 +333,8 @@ fn route(
 
         // ── Matchmaking ───────────────────────────────────────────────────────
         ClientMessage::JoinQueue => {
-            let name = ctx.as_ref()
+            let name = ctx
+                .as_ref()
                 .and_then(|c| c.name.clone())
                 .unwrap_or_else(|| format!("Player-{}", &ws_id.to_string()[..4]));
             if let Some(mm) = lobby.matchmaker.get() {
