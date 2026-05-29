@@ -39,10 +39,12 @@ function scoreClass(s: number) {
   return s > 0 ? 'win' : s < 0 ? 'loss' : ''
 }
 
-const partnerSeat = computed<number | null>(() => {
-  const p = state.value.meta?.partner
-  return typeof p === 'number' ? p : null
+const sm = computed(() => {
+  const m = state.value?.meta
+  return m?.kind === 'sheepshead' ? m : null
 })
+
+const partnerSeat = computed<number | null>(() => sm.value?.partner ?? null)
 
 const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th']
 function trickOrdinal(n: number) {
@@ -76,10 +78,7 @@ const partnerToast = computed(() => {
   return `${playerName(s)} is the partner!`
 })
 
-const calledSuit = computed<string | null>(() => {
-  const cs = store.gameState?.meta?.called_suit
-  return typeof cs === 'string' ? cs : null
-})
+const calledSuit = computed<string | null>(() => sm.value?.called_suit ?? null)
 
 const nextDealer = computed(() => (state.value.dealer + 1) % state.value.player_count)
 const isNextDealer = computed(() => seat.value === nextDealer.value)
@@ -87,10 +86,9 @@ const isNextDealer = computed(() => seat.value === nextDealer.value)
 const showReplay = ref(false)
 
 const buryForReplay = computed<{ picker: number; cards: Card[] } | null>(() => {
-  const picker = state.value.meta?.picker
-  const buried = state.value.meta?.buried
-  if (typeof picker !== 'number' || !Array.isArray(buried) || buried.length === 0) return null
-  return { picker, cards: buried as Card[] }
+  const m = sm.value
+  if (!m || m.picker === null || !m.buried || m.buried.length === 0) return null
+  return { picker: m.picker, cards: m.buried }
 })
 
 function openReplay() { showReplay.value = true }

@@ -18,16 +18,19 @@ const SUIT_LABELS: Record<string, string> = {
 
 const goAloneCalling = ref(false)
 
-// Callable suits are sent by the server when transitioning to the calling sub-phase
-const callableSuits = computed<string[]>(() => {
-  const cs = state.value.meta?.callable_suits
-  return Array.isArray(cs) ? (cs as string[]) : []
+const em = computed(() => {
+  const m = state.value?.meta
+  return m?.kind === 'euchre' ? m : null
 })
+
+// Callable suits: euchre calling allows any suit (all 4 shown when in calling sub-phase)
+// EuchreMeta does not carry callable_suits; render all four suits as callable.
+const callableSuits = computed<string[]>(() => ['clubs', 'spades', 'hearts', 'diamonds'])
 
 // "Stick the dealer" rule: dealer cannot pass in round 2 once 3 others have passed
 const mustCall = computed<boolean>(() => {
   if (seat.value !== state.value.dealer) return false
-  const passed2 = state.value.meta?.passed_round2
+  const passed2 = em.value?.passed_round2
   return typeof passed2 === 'number' && passed2 >= 3
 })
 

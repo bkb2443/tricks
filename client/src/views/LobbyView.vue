@@ -12,15 +12,17 @@ const chatInput = ref('')
 const chatEl    = ref<HTMLElement | null>(null)
 
 const isHost = computed(() => {
-  const hostSeat = gs.gameState?.meta?.host_seat
-  return typeof hostSeat === 'number' && hostSeat === gs.seat
+  const meta = gs.gameState?.meta
+  if (meta?.kind !== 'lobby') return false
+  return typeof meta.host_seat === 'number' && meta.host_seat === gs.seat
 })
 
 const roomCode = computed(() => gs.roomCode ?? '—')
 
 const countdownEndsAt = computed<number | null>(() => {
-  const v = gs.gameState?.meta?.countdown_ends_at
-  return typeof v === 'number' ? v : null
+  const meta = gs.gameState?.meta
+  if (meta?.kind !== 'lobby') return null
+  return typeof meta.countdown_ends_at === 'number' ? meta.countdown_ends_at : null
 })
 
 const secondsLeft = ref<number | null>(null)

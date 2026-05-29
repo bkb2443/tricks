@@ -17,7 +17,9 @@ function makeEuchreState(meta: Record<string, unknown> = {}): GameState {
     current_trick: null,
     completed_tricks: [],
     scores: [0, 0, 0, 0],
+    session_scores: [0, 0, 0, 0],
     meta: {
+      kind: 'euchre' as const,
       turned_up_card: null,
       sub_phase: 'ordering',
       passed_round1: 0,
@@ -51,7 +53,15 @@ describe('useEuchreState', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TST001' })
     store.handleUpdate({
       type: 'snapshot',
-      state: { ...makeEuchreState(), game_name: 'sheepshead', player_count: 5, hands: [[], [], [], [], []], scores: [0, 0, 0, 0, 0] },
+      state: {
+        ...makeEuchreState(),
+        game_name: 'sheepshead',
+        player_count: 5,
+        hands: [[], [], [], [], []],
+        scores: [0, 0, 0, 0, 0],
+        session_scores: [0, 0, 0, 0, 0],
+        meta: { kind: 'sheepshead' as const, picker: null, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null },
+      },
     })
     const { calledSuit, subPhase } = useEuchreState()
     expect(calledSuit.value).toBeNull()
