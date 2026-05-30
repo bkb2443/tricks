@@ -77,7 +77,7 @@ describe('game store', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing' }) })
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(1)
     expect(store.gameState?.current_trick?.led_by).toBe(1)
   })
@@ -92,7 +92,7 @@ describe('game store', () => {
         current_trick: { led_by: 1, plays: [[1, ACE_CLUBS]], winner: null },
       }),
     })
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, current_trick_winner: null, next_player: 3 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(2)
   })
 
@@ -101,10 +101,10 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 1 }) })
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.gameState?.current_player).toBe(2)
 
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, current_trick_winner: null, next_player: 3 })
     expect(store.gameState?.current_player).toBe(3)
   })
 
@@ -114,9 +114,9 @@ describe('game store', () => {
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 0 }) })
 
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS, next_player: 1 })
+    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS, current_trick_winner: null, next_player: 1 })
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.isMyTurn).toBe(true)
   })
 
@@ -129,7 +129,7 @@ describe('game store', () => {
     })
     expect(store.myHand).toHaveLength(2)
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(KING_CLUBS)
   })
@@ -142,7 +142,7 @@ describe('game store', () => {
       state: makeState({ phase: 'playing', hands: [[], [ACE_CLUBS], [], [], []] }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS, next_player: 1 })
+    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS, current_trick_winner: null, next_player: 1 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(ACE_CLUBS)
   })
@@ -163,7 +163,7 @@ describe('game store', () => {
       }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES, next_player: 0 })
+    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES, current_trick_winner: null, next_player: 0 })
     // Server sends the trick winner as next_player; trick_complete will follow
     expect(store.gameState?.current_player).toBe(0)
   })

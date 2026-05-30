@@ -2,6 +2,7 @@
 // Run `cargo test export_typescript_bindings` in server/ to regenerate.
 
 type JsonValue = number | string | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export interface ChatMessage { from: string; text: string; timestamp: number }
 
 export type Suit = "clubs" | "spades" | "hearts" | "diamonds";
 export type Rank = "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten" | "jack" | "queen" | "king" | "ace";

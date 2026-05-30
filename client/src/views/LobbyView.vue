@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, watch, onUnmounted } from 'vue'
+import { computed, ref, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameStore } from '@/stores/game'
 import { useGame } from '@/composables/useGame'
+import ChatPanel from '@/components/ChatPanel.vue'
 
 const router = useRouter()
 const gs = useGameStore()
 const { startGame, sendLobbyChat, forceBot, extendRejoin } = useGame()
-
-const chatInput = ref('')
-const chatEl    = ref<HTMLElement | null>(null)
 
 const isHost = computed(() => {
   const meta = gs.gameState?.meta
@@ -47,17 +45,6 @@ onUnmounted(() => {
 // Navigate to game when phase changes out of lobby
 watch(() => gs.gameState?.phase, (phase) => {
   if (phase && phase !== 'lobby') router.push('/game')
-})
-
-function sendChat() {
-  if (!chatInput.value.trim()) return
-  sendLobbyChat(chatInput.value.trim())
-  chatInput.value = ''
-}
-
-watch(() => gs.lobbyChat.length, async () => {
-  await nextTick()
-  if (chatEl.value) chatEl.value.scrollTop = chatEl.value.scrollHeight
 })
 
 async function copyCode() {
@@ -105,27 +92,7 @@ const seatStateLabel = (state: string) =>
 
     <!-- Chat -->
     <section class="chat">
-      <div ref="chatEl" class="chat-messages">
-        <div
-          v-for="(msg, i) in gs.lobbyChat"
-          :key="i"
-          class="chat-msg"
-          :class="{ system: msg.from === 'System' }"
-        >
-          <span class="chat-from">{{ msg.from }}:</span>
-          <span class="chat-text">{{ msg.text }}</span>
-        </div>
-        <div v-if="gs.lobbyChat.length === 0" class="chat-empty">No messages yet…</div>
-      </div>
-      <div class="chat-input-row">
-        <input
-          v-model="chatInput"
-          placeholder="Say something…"
-          maxlength="200"
-          @keydown.enter="sendChat"
-        />
-        <button @click="sendChat" :disabled="!chatInput.trim()">Send</button>
-      </div>
+      <ChatPanel :messages="gs.lobbyChat" @send="sendLobbyChat" />
     </section>
 
     <!-- Host controls -->
@@ -159,14 +126,7 @@ h1 { margin: 0; font-size: 2rem; }
 .host-controls { display: flex; gap: 0.25rem; justify-content: center; margin-top: 0.4rem; }
 .btn-sm { font-size: 0.7rem; padding: 0.15rem 0.4rem; background: #374151; }
 
-.chat { background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden; }
-.chat-messages { height: 180px; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
-.chat-msg { font-size: 0.85rem; }
-.chat-from { color: #9ca3af; margin-right: 0.4rem; }
-.chat-msg.system .chat-from { color: #f59e0b; }
-.chat-empty { color: #4b5563; font-style: italic; font-size: 0.85rem; }
-.chat-input-row { display: flex; gap: 0.5rem; padding: 0.5rem 0.75rem; border-top: 1px solid rgba(255,255,255,0.08); }
-.chat-input-row input { flex: 1; }
+.chat { background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; height: 240px; }
 
 .start-area { text-align: center; padding: 0.5rem; }
 .btn-start { background: #15803d; font-size: 1rem; padding: 0.6rem 2rem; }

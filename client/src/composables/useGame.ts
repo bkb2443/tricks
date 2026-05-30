@@ -11,17 +11,17 @@ export function useGame() {
 
   function createRoom(game: string, players: number): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', game, players })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: false })
   }
 
   function createSoloRoom(game: string, players: number): void {
     store.isSolo = true
-    sendMessage({ type: 'join_room', game, players, fill_bots: true })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true })
   }
 
   function joinRoom(roomId: string, game = 'sheepshead', players = 5): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', room_id: roomId, game, players })
+    sendMessage({ type: 'join_room', room_id: roomId, game, players, fill_bots: false })
   }
 
   function playCard(card: Card): void {
