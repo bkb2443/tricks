@@ -47,4 +47,11 @@ function isSelected(card: Card): boolean {
   justify-content: center;
 }
 .empty { color: #6b7280; font-style: italic; }
+
+@media (max-width: 640px) {
+  .hand {
+    gap: 4px;
+    padding: 0.35rem;
+  }
+}
 </style>

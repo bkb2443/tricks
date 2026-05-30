@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Card } from '@/engine/types'
 
 const props = defineProps<{
@@ -24,8 +24,64 @@ const symbol = computed(() => SUIT_SYMBOL[props.card.suit])
 const isRed  = computed(() => props.card.suit === 'hearts' || props.card.suit === 'diamonds')
 
 function handleClick() {
+  if (dragJustEnded) return
   if (props.selectable) emit('select', props.card)
 }
+
+// Touch drag-to-play
+const dragOffsetY = ref(0)
+const isDragging = ref(false)
+const isSnappingBack = ref(false)
+const isCancelling = ref(false)
+let touchStartY = 0
+let dragJustEnded = false
+
+const PLAY_THRESHOLD = 40
+
+function onTouchStart(e: TouchEvent) {
+  if (!props.selectable) return
+  touchStartY = e.touches[0].clientY
+  isDragging.value = true
+  isSnappingBack.value = false
+  dragOffsetY.value = 0
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (!isDragging.value) return
+  e.preventDefault()
+  const deltaY = touchStartY - e.touches[0].clientY
+  dragOffsetY.value = Math.max(0, deltaY)
+}
+
+function onTouchEnd() {
+  if (!isDragging.value) return
+  isDragging.value = false
+  dragJustEnded = true
+  setTimeout(() => { dragJustEnded = false }, 300)
+  if (dragOffsetY.value >= PLAY_THRESHOLD) {
+    dragOffsetY.value = 0
+    emit('select', props.card)
+  } else {
+    // Animate back to resting position, then shake
+    isSnappingBack.value = true
+    dragOffsetY.value = 0
+    setTimeout(() => {
+      isSnappingBack.value = false
+      isCancelling.value = true
+      setTimeout(() => { isCancelling.value = false }, 250)
+    }, 100)
+  }
+}
+
+const dragStyle = computed(() => {
+  if (isDragging.value && dragOffsetY.value > 0) {
+    return { transform: `translateY(-${dragOffsetY.value}px)`, transition: 'none' }
+  }
+  if (isSnappingBack.value) {
+    return { transform: 'translateY(0)', transition: 'transform 0.1s ease' }
+  }
+  return {}
+})
 </script>
 
 <template>
@@ -37,10 +93,15 @@ function handleClick() {
       red: isRed && !faceDown,
       black: !isRed && !faceDown,
       'face-down': faceDown,
+      'drag-cancel': isCancelling,
     }"
+    :style="dragStyle"
     :aria-label="faceDown ? 'face-down card' : `${rank} of ${card.suit}`"
     :role="selectable ? 'button' : undefined"
     @click="handleClick"
+    @touchstart.passive="onTouchStart"
+    @touchmove="onTouchMove"
+    @touchend.passive="onTouchEnd"
   >
     <template v-if="!faceDown">
       <span class="corner top-left">{{ rank }}<br />{{ symbol }}</span>
@@ -56,8 +117,8 @@ function handleClick() {
 <style scoped>
 .card {
   position: relative;
-  width: 62px;
-  height: 92px;
+  width: var(--card-w);
+  height: var(--card-h);
   border: 1px solid #9ca3af;
   border-radius: 7px;
   background: #fff;
@@ -67,6 +128,7 @@ function handleClick() {
   user-select: none;
   flex-shrink: 0;
   transition: transform 0.1s, box-shadow 0.1s;
+  touch-action: manipulation;
 }
 
 .card.red   { color: #dc2626; }
@@ -94,4 +156,18 @@ function handleClick() {
 .bottom-right { bottom: 4px; right: 5px; transform: rotate(180deg); }
 
 .center-symbol { font-size: 1.6rem; }
+
+@keyframes drag-cancel {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+.drag-cancel { animation: drag-cancel 0.25s ease; }
+
+@media (max-width: 640px) {
+  .corner { font-size: 0.55rem; }
+  .center-symbol { font-size: 1.15rem; }
+  .card.selectable:hover { transform: none; box-shadow: none; }
+  .card.selected { transform: translateY(-8px); }
+}
 </style>

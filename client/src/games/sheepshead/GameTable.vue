@@ -535,4 +535,47 @@ watch(
   align-self: center;
 }
 .catchup-panel button:hover { background: #4f46e5; }
+
+@media (max-width: 640px) {
+  .sheepshead-table {
+    gap: 0.5rem;
+  }
+
+  .table-header {
+    gap: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .seats {
+    gap: 0.35rem;
+  }
+
+  .seat {
+    padding: 0.25rem 0.4rem;
+    min-width: 52px;
+    font-size: 0.72rem;
+  }
+
+  .my-hand {
+    padding: 0.5rem;
+  }
+
+  .my-hand-label {
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+  }
+
+  .session-scores {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .game-over {
+    padding: 0.75rem;
+  }
+
+  .phase-toast {
+    font-size: 1.4rem;
+    padding: 0.75rem 1.75rem;
+  }
+}
 </style>

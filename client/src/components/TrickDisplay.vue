@@ -143,4 +143,20 @@ const winnerIdx = computed(() => {
   box-shadow: 0 0 8px rgba(245, 158, 11, 0.45);
 }
 .waiting { color: #6b7280; font-style: italic; }
+
+@media (max-width: 640px) {
+  .trick-area {
+    padding: 0.5rem;
+    min-height: 90px;
+    margin: 0.5rem 0;
+  }
+
+  .trick-plays {
+    gap: 8px;
+  }
+
+  .play-header { gap: 2px; }
+  .player-label { font-size: 0.65rem; }
+  .order-badge { font-size: 0.75rem; }
+}
 </style>
