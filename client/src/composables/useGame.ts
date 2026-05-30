@@ -11,17 +11,17 @@ export function useGame() {
 
   function createRoom(game: string, players: number): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', game, players })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: false })
   }
 
   function createSoloRoom(game: string, players: number): void {
     store.isSolo = true
-    sendMessage({ type: 'join_room', game, players, fill_bots: true })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true })
   }
 
   function joinRoom(roomId: string, game = 'sheepshead', players = 5): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', room_id: roomId, game, players })
+    sendMessage({ type: 'join_room', room_id: roomId, game, players, fill_bots: false })
   }
 
   function playCard(card: Card): void {
@@ -53,6 +53,11 @@ export function useGame() {
   function joinWithCode(name: string, roomCode: string): void {
     store.isSolo = false
     sendMessage({ type: 'join', name, room_code: roomCode })
+  }
+
+  function spectateRoom(name: string, roomCode: string): void {
+    store.isSolo = false
+    sendMessage({ type: 'spectate', name, room_code: roomCode })
   }
 
   function createPrivateRoom(game: string, maxHands: number | null, name: string): void {
@@ -91,7 +96,7 @@ export function useGame() {
   return {
     store, connected,
     createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
-    joinWithCode, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
+    joinWithCode, spectateRoom, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
     startNextHand,
   }
 }

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum Suit {
     Clubs,
     Spades,
@@ -11,8 +13,9 @@ pub enum Suit {
 
 /// Ranks present in a standard deck. Games that use fewer ranks (e.g. Sheepshead
 /// drops 2–6) enforce this in `Game::build_deck`, not here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export)]
 pub enum Rank {
     Two,
     Three,
@@ -29,7 +32,8 @@ pub enum Rank {
     Ace,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Card {
     pub suit: Suit,
     pub rank: Rank,
@@ -38,18 +42,19 @@ pub struct Card {
 impl Suit {
     pub fn as_str(self) -> &'static str {
         match self {
-            Suit::Clubs    => "clubs",
-            Suit::Spades   => "spades",
-            Suit::Hearts   => "hearts",
+            Suit::Clubs => "clubs",
+            Suit::Spades => "spades",
+            Suit::Hearts => "hearts",
             Suit::Diamonds => "diamonds",
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
-            "clubs"    => Some(Suit::Clubs),
-            "spades"   => Some(Suit::Spades),
-            "hearts"   => Some(Suit::Hearts),
+            "clubs" => Some(Suit::Clubs),
+            "spades" => Some(Suit::Spades),
+            "hearts" => Some(Suit::Hearts),
             "diamonds" => Some(Suit::Diamonds),
             _ => None,
         }

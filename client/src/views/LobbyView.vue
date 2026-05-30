@@ -10,15 +10,17 @@ const gs = useGameStore()
 const { startGame, sendLobbyChat, forceBot, extendRejoin } = useGame()
 
 const isHost = computed(() => {
-  const hostSeat = gs.gameState?.meta?.host_seat
-  return typeof hostSeat === 'number' && hostSeat === gs.seat
+  const meta = gs.gameState?.meta
+  if (meta?.kind !== 'lobby') return false
+  return typeof meta.host_seat === 'number' && meta.host_seat === gs.seat
 })
 
 const roomCode = computed(() => gs.roomCode ?? '—')
 
 const countdownEndsAt = computed<number | null>(() => {
-  const v = gs.gameState?.meta?.countdown_ends_at
-  return typeof v === 'number' ? v : null
+  const meta = gs.gameState?.meta
+  if (meta?.kind !== 'lobby') return null
+  return typeof meta.countdown_ends_at === 'number' ? meta.countdown_ends_at : null
 })
 
 const secondsLeft = ref<number | null>(null)
@@ -62,6 +64,11 @@ const seatStateLabel = (state: string) =>
         <button class="btn-copy" @click="copyCode" title="Copy room code">📋</button>
       </div>
     </header>
+
+    <!-- Spectator count -->
+    <p v-if="gs.spectatorCount > 0" class="spectator-count">
+      {{ gs.spectatorCount }} {{ gs.spectatorCount === 1 ? 'person' : 'people' }} watching
+    </p>
 
     <!-- Seat rail -->
     <section class="seats">
@@ -107,6 +114,7 @@ h1 { margin: 0; font-size: 2rem; }
 .room-code { display: flex; align-items: center; gap: 0.5rem; background: rgba(255,255,255,0.08); border-radius: 6px; padding: 0.3rem 0.75rem; font-family: monospace; font-size: 1.2rem; }
 .btn-copy { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 0; }
 
+.spectator-count { margin: 0 0 0.5rem; font-size: 0.8rem; color: #9ca3af; }
 .seats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
 .seat-card { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 0.75rem; text-align: center; border: 1px solid transparent; }
 .seat-card.me { border-color: rgba(34,197,94,0.6); }
@@ -126,4 +134,27 @@ h1 { margin: 0; font-size: 2rem; }
 .hint { color: #9ca3af; font-size: 0.85rem; margin: 0 0 0.5rem; }
 .waiting { color: #6b7280; font-style: italic; }
 .countdown { color: #fbbf24; font-size: 1.1rem; font-weight: 700; margin-top: 0.5rem; }
+
+@media (max-width: 640px) {
+  .lobby {
+    margin: 0.75rem auto;
+    gap: 0.75rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+
+  .seats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .seat-card {
+    padding: 0.5rem;
+  }
+
+  .seat-name {
+    font-size: 0.8rem;
+  }
+}
 </style>

@@ -37,4 +37,14 @@ h1 { font-size: 2rem; }
 .hint { color: #6b7280; font-size: 0.85rem; }
 .btn-cancel { background: #6b7280; }
 .btn-cancel:hover { background: #4b5563; }
+
+@media (max-width: 640px) {
+  .queue {
+    margin: 3rem auto;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+  }
+}
 </style>

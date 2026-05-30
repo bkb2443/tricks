@@ -16,7 +16,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     current_trick: null,
     completed_tricks: [],
     scores: [0, 0, 0, 0, 0],
-    meta: { picker: null, passed: 0, buried: [], leaster: false },
+    session_scores: [0, 0, 0, 0, 0],
+    meta: { kind: 'sheepshead', picker: null, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null },
     names: [],
     ...overrides,
   }
@@ -76,7 +77,7 @@ describe('game store', () => {
     const store = useGameStore()
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing' }) })
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(1)
     expect(store.gameState?.current_trick?.led_by).toBe(1)
   })
@@ -91,7 +92,7 @@ describe('game store', () => {
         current_trick: { led_by: 1, plays: [[1, ACE_CLUBS]], winner: null },
       }),
     })
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, current_trick_winner: null, next_player: 3 })
     expect(store.gameState?.current_trick?.plays).toHaveLength(2)
   })
 
@@ -100,10 +101,10 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 0, room_code: 'TEST01' })
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 1 }) })
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.gameState?.current_player).toBe(2)
 
-    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, next_player: 3 })
+    store.handleUpdate({ type: 'card_played', player: 2, card: KING_CLUBS, current_trick_winner: null, next_player: 3 })
     expect(store.gameState?.current_player).toBe(3)
   })
 
@@ -113,9 +114,9 @@ describe('game store', () => {
     store.handleUpdate({ type: 'snapshot', state: makeState({ phase: 'playing', current_player: 0 }) })
 
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS, next_player: 1 })
+    store.handleUpdate({ type: 'card_played', player: 0, card: ACE_CLUBS, current_trick_winner: null, next_player: 1 })
     expect(store.isMyTurn).toBe(false)
-    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: KING_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.isMyTurn).toBe(true)
   })
 
@@ -128,7 +129,7 @@ describe('game store', () => {
     })
     expect(store.myHand).toHaveLength(2)
 
-    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, next_player: 2 })
+    store.handleUpdate({ type: 'card_played', player: 1, card: ACE_CLUBS, current_trick_winner: null, next_player: 2 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(KING_CLUBS)
   })
@@ -141,7 +142,7 @@ describe('game store', () => {
       state: makeState({ phase: 'playing', hands: [[], [ACE_CLUBS], [], [], []] }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS, next_player: 1 })
+    store.handleUpdate({ type: 'card_played', player: 0, card: KING_CLUBS, current_trick_winner: null, next_player: 1 })
     expect(store.myHand).toHaveLength(1)
     expect(store.myHand[0]).toEqual(ACE_CLUBS)
   })
@@ -162,7 +163,7 @@ describe('game store', () => {
       }),
     })
 
-    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES, next_player: 0 })
+    store.handleUpdate({ type: 'card_played', player: 4, card: NINE_SPADES, current_trick_winner: null, next_player: 0 })
     // Server sends the trick winner as next_player; trick_complete will follow
     expect(store.gameState?.current_player).toBe(0)
   })
@@ -249,7 +250,8 @@ describe('game store', () => {
 
     expect(store.picker).toBe(2)
     expect(store.isPicker).toBe(true)
-    expect(store.gameState?.meta?.sub_phase).toBe('burying')
+    const meta = store.gameState?.meta
+    expect(meta?.kind === 'sheepshead' ? meta.sub_phase : null).toBe('burying')
   })
 
   it('bid_placed for bury advances current_player to first trick leader', () => {
@@ -257,7 +259,7 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
-      state: makeState({ dealer: 1, current_player: 2, meta: { picker: 2, passed: 0, buried: [], leaster: false } }),
+      state: makeState({ dealer: 1, current_player: 2, meta: { kind: 'sheepshead', picker: 2, passed: 0, buried: [], leaster: false, sub_phase: 'burying', callable_suits: [], called_suit: null, going_alone: false, partner: null } }),
     })
 
     // After bury, server sets current_player to (dealer+1) % 5 = 2
@@ -319,7 +321,7 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
-      state: makeState({ meta: { picker: 1, passed: 0, buried: [], leaster: false } }),
+      state: makeState({ meta: { kind: 'sheepshead', picker: 1, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null } }),
     })
     expect(store.picker).toBe(1)
     expect(store.isPicker).toBe(true)

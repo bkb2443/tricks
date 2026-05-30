@@ -1,5 +1,8 @@
 use axum::{
-    extract::{State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{
+        State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
+    },
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -15,7 +18,7 @@ use crate::{
 type Sink = futures_util::stream::SplitSink<WebSocket, Message>;
 
 struct PlayerCtx {
-    seat: usize,
+    seat: Option<usize>, // None for spectators
     name: Option<String>,
     ws_id: Uuid,
     room: Arc<Room>,
@@ -81,15 +84,19 @@ async fn handle_socket(socket: WebSocket, lobby: Arc<Lobby>) {
 
     // Cleanup on disconnect
     if let Some(c) = ctx {
-        let phase = {
-            let guard = c.room.state.lock().unwrap();
-            guard.as_ref().map(|s| s.phase.clone())
-        };
-        if phase == Some(GamePhase::Lobby) {
-            c.room.on_disconnect(c.seat, c.ws_id);
+        if let Some(seat) = c.seat {
+            let phase = {
+                let guard = c.room.state.lock().unwrap();
+                guard.as_ref().map(|s| s.phase.clone())
+            };
+            if phase == Some(GamePhase::Lobby) {
+                c.room.on_disconnect(seat, c.ws_id);
+            } else {
+                let room = Arc::clone(&c.room);
+                tokio::spawn(async move { room.on_disconnect(seat, c.ws_id); });
+            }
         } else {
-            let room = Arc::clone(&c.room);
-            tokio::spawn(async move { room.on_disconnect(c.seat, c.ws_id); });
+            c.room.on_spectator_disconnect(c.ws_id);
         }
         if let Some(mm) = lobby.matchmaker.get() {
             mm.leave_queue(c.ws_id);
@@ -110,40 +117,63 @@ fn route(
 ) -> Option<StateUpdate> {
     match msg {
         // ── Legacy solo path ─────────────────────────────────────────────────
-        ClientMessage::JoinRoom { room_id, game, players, fill_bots } => {
+        ClientMessage::JoinRoom {
+            room_id,
+            game,
+            players,
+            fill_bots,
+        } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let room = match room_id {
-                Some(ref id) => lobby.get_room(&id.to_string()).or_else(|| {
-                    lobby.create_room(game, players, 24).map(|(_, r)| r)
-                })?,
+                Some(ref id) => lobby
+                    .get_room(&id.to_string())
+                    .or_else(|| lobby.create_room(game, players, 24).map(|(_, r)| r))?,
                 None => lobby.create_room(game, players, 24).map(|(_, r)| r)?,
             };
             match room.join(player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
                     let code = room.room_code.clone();
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code: code };
+                    let reply = StateUpdate::JoinedRoom {
+                        room_id: room.id,
+                        seat,
+                        room_code: code,
+                    };
                     if fill_bots {
                         let room_arc = Arc::clone(&room);
                         room_arc.fill_bots();
                         room_arc.start_game();
                     }
-                    *ctx = Some(PlayerCtx { seat, name: None, ws_id, room, broadcast_rx });
+                    *ctx = Some(PlayerCtx { seat: Some(seat), name: None, ws_id, room, broadcast_rx });
                     Some(reply)
                 }
-                None => Some(StateUpdate::Error { message: "room is full".into() }),
+                None => Some(StateUpdate::Error {
+                    message: "room is full".into(),
+                }),
             }
         }
 
         // ── Multiplayer: create a new private room ────────────────────────────
-        ClientMessage::CreateRoom { name, game, max_hands } => {
+        ClientMessage::CreateRoom {
+            name,
+            game,
+            max_hands,
+        } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let (code, room) = match lobby.create_room(game, 5, 24) {
                 Some(r) => r,
-                None => return Some(StateUpdate::Error { message: "unknown game".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "unknown game".into(),
+                    });
+                }
             };
             if let Some(mh) = max_hands {
                 room.set_max_hands(mh);
@@ -151,15 +181,44 @@ fn route(
             match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
                     let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code: code };
-                    *ctx = Some(PlayerCtx { seat, name: Some(name), ws_id, room, broadcast_rx });
+                    *ctx = Some(PlayerCtx { seat: Some(seat), name: Some(name), ws_id, room, broadcast_rx });
                     Some(reply)
                 }
-                None => Some(StateUpdate::Error { message: "failed to join room".into() }),
+                None => Some(StateUpdate::Error {
+                    message: "failed to join room".into(),
+                }),
             }
         }
 
         // ── Multiplayer: join existing room by short code ─────────────────────
         ClientMessage::Join { name, room_code } => {
+            if ctx.is_some() {
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
+            }
+            let room = match lobby.get_room(&room_code) {
+                Some(r) => r,
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: format!("room '{room_code}' not found"),
+                    });
+                }
+            };
+            match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
+                Some((seat, broadcast_rx)) => {
+                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code };
+                    *ctx = Some(PlayerCtx { seat: Some(seat), name: Some(name), ws_id, room, broadcast_rx });
+                    Some(reply)
+                }
+                None => Some(StateUpdate::Error {
+                    message: "room is full or name already taken".into(),
+                }),
+            }
+        }
+
+        // ── Spectate: join as observer, no seat ───────────────────────────────
+        ClientMessage::Spectate { name, room_code } => {
             if ctx.is_some() {
                 return Some(StateUpdate::Error { message: "already in a room".into() });
             }
@@ -169,22 +228,20 @@ fn route(
                     message: format!("room '{room_code}' not found"),
                 }),
             };
-            match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
-                Some((seat, broadcast_rx)) => {
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code };
-                    *ctx = Some(PlayerCtx { seat, name: Some(name), ws_id, room, broadcast_rx });
-                    Some(reply)
-                }
-                None => Some(StateUpdate::Error {
-                    message: "room is full or name already taken".into(),
-                }),
-            }
+            let broadcast_rx = room.join_as_spectator(ws_id, player_tx.clone());
+            let reply = StateUpdate::JoinedAsSpectator { room_id: room.id, room_code };
+            *ctx = Some(PlayerCtx { seat: None, name: Some(name), ws_id, room, broadcast_rx });
+            Some(reply)
         }
 
         // ── Game actions ──────────────────────────────────────────────────────
         ClientMessage::Bid { value } => {
             let c = ctx.as_ref()?;
-            match c.room.apply_bid(c.seat, value) {
+            let seat = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+            };
+            match c.room.apply_bid(seat, value) {
                 Ok(()) => {
                     let room_arc = Arc::clone(&c.room);
                     tokio::spawn(async move { room_arc.drive_bots().await });
@@ -196,7 +253,11 @@ fn route(
 
         ClientMessage::PlayCard { card } => {
             let c = ctx.as_ref()?;
-            match c.room.play_card(c.seat, card) {
+            let seat = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+            };
+            match c.room.play_card(seat, card) {
                 Ok(()) => {
                     let room_arc = Arc::clone(&c.room);
                     tokio::spawn(async move { room_arc.drive_bots().await });
@@ -209,7 +270,11 @@ fn route(
         // ── Lobby actions ─────────────────────────────────────────────────────
         ClientMessage::LobbyChat { text } => {
             let c = ctx.as_ref()?;
-            match c.room.handle_lobby_chat(c.seat, text) {
+            let seat = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot send chat".into() }),
+            };
+            match c.room.handle_lobby_chat(seat, text) {
                 Ok(()) => None,
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
@@ -217,6 +282,9 @@ fn route(
 
         ClientMessage::StartGame => {
             let c = ctx.as_ref()?;
+            if c.seat.is_none() {
+                return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() });
+            }
             let room = Arc::clone(&c.room);
             room.start_game();
             None
@@ -224,7 +292,11 @@ fn route(
 
         ClientMessage::ForceBot { seat } => {
             let c = ctx.as_ref()?;
-            match c.room.force_bot(seat, c.seat) {
+            let requester = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+            };
+            match c.room.force_bot(seat, requester) {
                 Ok(()) => None,
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
@@ -232,7 +304,11 @@ fn route(
 
         ClientMessage::ExtendRejoin { seat } => {
             let c = ctx.as_ref()?;
-            match c.room.extend_rejoin(seat, c.seat) {
+            let requester = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+            };
+            match c.room.extend_rejoin(seat, requester) {
                 Ok(()) => None,
                 Err(msg) => Some(StateUpdate::Error { message: msg }),
             }
@@ -241,7 +317,10 @@ fn route(
         // ── Match-play ────────────────────────────────────────────────────────
         ClientMessage::StartNextHand => {
             let c = ctx.as_ref()?;
-            let seat = c.seat;
+            let seat = match c.seat {
+                Some(s) => s,
+                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+            };
             match c.room.start_next_hand_dealer(seat) {
                 Ok(()) => {
                     let room_arc = Arc::clone(&c.room);
@@ -254,7 +333,8 @@ fn route(
 
         // ── Matchmaking ───────────────────────────────────────────────────────
         ClientMessage::JoinQueue => {
-            let name = ctx.as_ref()
+            let name = ctx
+                .as_ref()
                 .and_then(|c| c.name.clone())
                 .unwrap_or_else(|| format!("Player-{}", &ws_id.to_string()[..4]));
             if let Some(mm) = lobby.matchmaker.get() {

@@ -17,6 +17,11 @@ const { playerName } = store
 const { playCard, startNextHand } = useGame()
 const { callerSeat, sitsOut, calledSuit } = useEuchreState()
 
+const goingAlone = computed<boolean>(() => {
+  const m = store.gameState?.meta
+  return m?.kind === 'euchre' ? m.going_alone : false
+})
+
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const state = computed(() => store.gameState!)
 const seat  = computed(() => store.seat ?? 0)
@@ -111,6 +116,7 @@ watch(
       <span class="trick-counter">
         Trick {{ completedTricks + currentTrickCount }} / 5
       </span>
+      <span v-if="store.isSpectator" class="spectator-badge">Watching</span>
     </header>
 
     <!-- ── Seat rail (other players) ──────────────────────────── -->
@@ -145,19 +151,19 @@ watch(
       :current-winner-seat="store.currentTrickWinner"
     />
 
-    <!-- ── Bidding panel (only during Bidding phase) ──────────── -->
-    <euchre-bidding-panel v-if="state.phase === 'bidding'" />
+    <!-- ── Bidding panel (only during Bidding phase, not for spectators) ── -->
+    <euchre-bidding-panel v-if="state.phase === 'bidding' && !store.isSpectator" />
 
     <!-- ── My hand ────────────────────────────────────────────── -->
     <section
-      v-if="state.phase !== 'scoring' && state.phase !== 'intermission' && seat !== sitsOut"
+      v-if="!store.isSpectator && state.phase !== 'scoring' && state.phase !== 'intermission' && seat !== sitsOut"
       class="my-hand"
       :class="{ 'your-turn-glow': canPlay }"
     >
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
         <span v-if="seat === callerSeat" class="badge caller-badge">Caller</span>
-        <span v-if="seat === callerSeat && state.meta?.going_alone" class="badge alone-badge">Alone</span>
+        <span v-if="seat === callerSeat && goingAlone" class="badge alone-badge">Alone</span>
         <span v-if="seat === state.dealer" class="badge">Dealer</span>
         <span v-if="calledSuit" class="badge trump-badge">
           Trump: {{ SUIT_SYMBOLS[calledSuit] ?? calledSuit }}
@@ -231,7 +237,10 @@ watch(
         </li>
       </ul>
       <div class="next-hand-controls">
-        <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
+        <template v-if="!store.isSpectator">
+          <button v-if="isNextDealer" class="deal-button" @click="startNextHand">Deal Next Hand</button>
+          <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
+        </template>
         <p v-else class="next-hand-hint">Waiting for {{ playerName(nextDealer) }} to deal…</p>
       </div>
       <div v-if="state.completed_tricks.length" class="replay-entry">
@@ -271,7 +280,7 @@ watch(
     <!-- ── Session over ──────────────────────────────────────── -->
     <section v-if="store.sessionWinner !== null" class="game-over session-over">
       <!-- Euchre: winner field is one seat on the winning team; check team membership. -->
-      <h2>{{ store.sessionWinner! % 2 === seat % 2 ? '🏆 Your Team Wins!' : 'Opponents Win!' }}</h2>
+      <h2>{{ (!store.isSpectator && store.sessionWinner! % 2 === seat % 2) ? '🏆 Your Team Wins!' : (store.sessionWinner! % 2 === 0 ? 'Team 1 Wins!' : 'Team 2 Wins!') }}</h2>
       <ul class="score-list">
         <li
           v-for="(score, i) in store.sessionScores"
@@ -327,6 +336,7 @@ watch(
 .phase-badge.scoring { background: #b45309; }
 .phase-badge.intermission { background: #1d4ed8; }
 .dealer-badge, .trick-counter { font-size: 0.8rem; color: #9ca3af; }
+.spectator-badge { font-size: 0.7rem; background: #374151; color: #d1d5db; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
 
 /* Seat rail */
 .seats {
@@ -552,4 +562,47 @@ watch(
   align-self: center;
 }
 .catchup-panel button:hover { background: #4f46e5; }
+
+@media (max-width: 640px) {
+  .euchre-table {
+    gap: 0.5rem;
+  }
+
+  .table-header {
+    gap: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  .seats {
+    gap: 0.35rem;
+  }
+
+  .seat {
+    padding: 0.25rem 0.4rem;
+    min-width: 52px;
+    font-size: 0.72rem;
+  }
+
+  .my-hand {
+    padding: 0.5rem;
+  }
+
+  .my-hand-label {
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+  }
+
+  .session-scores {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .game-over {
+    padding: 0.75rem;
+  }
+
+  .phase-toast {
+    font-size: 1.4rem;
+    padding: 0.75rem 1.75rem;
+  }
+}
 </style>

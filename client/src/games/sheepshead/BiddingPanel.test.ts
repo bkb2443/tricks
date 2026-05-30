@@ -18,7 +18,9 @@ function makeState(meta: object, currentPlayer = 1): GameState {
     current_trick: null,
     completed_tricks: [],
     scores: [0, 0, 0, 0, 0],
+    session_scores: [0, 0, 0, 0, 0],
     meta: {
+      kind: 'sheepshead' as const,
       picker: null, sub_phase: 'picking', passed: 0,
       buried: [], leaster: false, callable_suits: [],
       called_suit: null, going_alone: false, partner: null,

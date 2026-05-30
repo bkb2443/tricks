@@ -11,22 +11,27 @@ const { playerName } = store
 const { pick, pass, bury, callAce, goAlone } = useGame()
 
 // Two sub-phases: picking (anyone can pick/pass) and burying (picker discards 2)
+const sm = computed(() => {
+  const m = store.gameState?.meta
+  return m?.kind === 'sheepshead' ? m : null
+})
+
 const isPickingPhase = computed(() => store.picker === null)
 const isBuryPhase    = computed(() =>
   store.picker !== null &&
   store.phase === 'bidding' &&
-  store.gameState?.meta?.sub_phase === 'burying'
+  sm.value?.sub_phase === 'burying'
 )
 
 const isMyPickTurn = computed(() => isPickingPhase.value && store.isMyTurn)
 const isMyBuryTurn = computed(() => isBuryPhase.value && store.isPicker)
 
 const isCallingPhase = computed(() =>
-  store.gameState?.meta?.sub_phase === 'calling' && store.phase === 'bidding'
+  sm.value?.sub_phase === 'calling' && store.phase === 'bidding'
 )
 const callableSuits = computed<string[]>(() => {
-  const cs = store.gameState?.meta?.callable_suits
-  return Array.isArray(cs) ? (cs as string[]) : []
+  const cs = sm.value?.callable_suits
+  return Array.isArray(cs) ? cs : []
 })
 const isMyCallTurn = computed(() => isCallingPhase.value && store.isPicker)
 

@@ -6,7 +6,7 @@ import { connected } from '@/engine/socket'
 import { GAMES, getGameInfo } from '@/engine/games'
 
 const router = useRouter()
-const { createSoloRoom, joinWithCode, joinQueue, createPrivateRoom } = useGame()
+const { createSoloRoom, joinWithCode, spectateRoom, joinQueue, createPrivateRoom } = useGame()
 
 const guestName = ref(localStorage.getItem('guestName') ?? '')
 const joinCode  = ref('')
@@ -40,6 +40,13 @@ function handleJoinCode() {
   if (!joinCode.value.trim()) return
   joinWithCode(guestName.value.trim(), joinCode.value.trim().toUpperCase())
   router.push('/lobby')
+}
+
+function handleSpectate() {
+  if (!saveName()) return
+  if (!joinCode.value.trim()) return
+  spectateRoom(guestName.value.trim(), joinCode.value.trim().toUpperCase())
+  router.push('/game')
 }
 
 function handleFindGame() {
@@ -110,7 +117,10 @@ onMounted(() => {
       <section class="join-code-section">
         <h2>Join with Code</h2>
         <input v-model="joinCode" placeholder="WOLF-42" maxlength="10" @keydown.enter="handleJoinCode" />
-        <button :disabled="!connected || !joinCode.trim()" @click="handleJoinCode">Join →</button>
+        <div class="join-actions">
+          <button :disabled="!connected || !joinCode.trim()" @click="handleJoinCode">Join →</button>
+          <button class="btn-watch" :disabled="!connected || !joinCode.trim()" @click="handleSpectate">Watch →</button>
+        </div>
       </section>
     </div>
   </div>
@@ -133,6 +143,10 @@ h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
 .btn-solo:hover:not(:disabled) { background: #4f46e5; }
 .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
 .join-code-section { grid-column: 1 / -1; }
+.join-actions { display: flex; gap: 0.5rem; }
+.join-actions button { flex: 1; }
+.btn-watch { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); }
+.btn-watch:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
 section { background: rgba(0,0,0,0.25); border-radius: 8px; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
 h2 { margin: 0; font-size: 1rem; }
 .hint { margin: 0; font-size: 0.8rem; color: #6b7280; }
@@ -161,4 +175,37 @@ input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0
 .game-name { font-size: 1rem; font-weight: 600; }
 .game-detail { font-size: 0.75rem; color: #9ca3af; }
 .game-option.selected .game-detail { color: #c7d2fe; }
+
+@media (max-width: 640px) {
+  .home {
+    margin: 1rem auto;
+  }
+
+  h1 {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  .panels {
+    grid-template-columns: 1fr;
+  }
+
+  .join-code-section {
+    grid-column: auto;
+  }
+
+  .solo {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .game-options {
+    flex-wrap: wrap;
+  }
+
+  .game-option {
+    min-width: 120px;
+  }
+}
 </style>

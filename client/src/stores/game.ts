@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, ChatMessage, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
+import type { Card, ChatMessage, GamePhase, GameState, SeatInfo, StateUpdate, Trick, GameMeta } from '@/engine/types'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -20,6 +20,8 @@ export const useGameStore = defineStore('game', () => {
   const lobbyChat      = ref<ChatMessage[]>([])
   const queueStatus    = ref<{ position: number; waiting_since: number } | null>(null)
   const roomCode       = ref<string | null>(null)
+  const isSpectator    = ref<boolean>(false)
+  const spectatorCount = ref<number>(0)
   let pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -31,8 +33,9 @@ export const useGameStore = defineStore('game', () => {
 
   /** Seat of the Sheepshead picker, or null if nobody has picked yet. */
   const picker = computed<number | null>(() => {
-    const p = gameState.value?.meta?.picker
-    return typeof p === 'number' ? p : null
+    const meta = gameState.value?.meta
+    if (meta?.kind === 'sheepshead') return meta.picker ?? null
+    return null
   })
 
   const isPicker = computed(
@@ -59,9 +62,17 @@ export const useGameStore = defineStore('game', () => {
 
     switch (update.type) {
       case 'joined_room':
-        roomId.value   = update.room_id
-        seat.value     = update.seat
-        roomCode.value = update.room_code || null
+        roomId.value      = update.room_id
+        seat.value        = update.seat
+        roomCode.value    = update.room_code || null
+        isSpectator.value = false
+        break
+
+      case 'joined_as_spectator':
+        roomId.value      = update.room_id
+        seat.value        = null
+        isSpectator.value = true
+        roomCode.value    = update.room_code || null
         break
 
       case 'snapshot':
@@ -72,7 +83,8 @@ export const useGameStore = defineStore('game', () => {
         }
         gameState.value = update.state
         // The snapshot only populates our own hand slot; sync myHand from it.
-        myHand.value = update.state.hands[seat.value!] ?? []
+        // Spectators have no seat, so their hand is always empty.
+        myHand.value = seat.value !== null ? (update.state.hands[seat.value] ?? []) : []
         currentTrickWinner.value = -1
         // Sync session scores from snapshot (server now includes them)
         if (update.state.session_scores?.length) {
@@ -140,11 +152,8 @@ export const useGameStore = defineStore('game', () => {
           gameState.value.current_player = update.current_player
           // Merge any game-metadata included in the bid payload (e.g. sub_phase, callable_suits
           // when transitioning to the calling sub-phase after bury).
-          if (typeof update.value === 'object' && update.value !== null) {
-            gameState.value.meta = {
-              ...gameState.value.meta,
-              ...(update.value as Record<string, unknown>),
-            }
+          if (update.value && typeof update.value === 'object' && !Array.isArray(update.value)) {
+            gameState.value.meta = { ...gameState.value.meta, ...(update.value as object) } as GameMeta
           }
         }
         break
@@ -161,7 +170,10 @@ export const useGameStore = defineStore('game', () => {
 
       case 'partner_revealed':
         if (gameState.value) {
-          gameState.value.meta = { ...gameState.value.meta, partner: update.seat }
+          const m = gameState.value.meta
+          if (m.kind === 'sheepshead') {
+            gameState.value.meta = { ...m, partner: update.seat }
+          }
         }
         partnerRevealedSeat.value = update.seat
         setTimeout(() => { partnerRevealedSeat.value = null }, 2000)
@@ -169,6 +181,7 @@ export const useGameStore = defineStore('game', () => {
 
       case 'seat_update':
         seats.value = update.seats
+        spectatorCount.value = update.spectator_count ?? 0
         break
 
       case 'lobby_chat':
@@ -205,11 +218,13 @@ export const useGameStore = defineStore('game', () => {
     completedTrick.value = null
     currentTrickWinner.value = -1
     partnerRevealedSeat.value = null
-    seats.value       = []
-    lobbyChat.value   = []
-    queueStatus.value = null
-    roomCode.value    = null
-    showCatchUp.value = false
+    seats.value          = []
+    lobbyChat.value      = []
+    queueStatus.value    = null
+    roomCode.value       = null
+    showCatchUp.value    = false
+    isSpectator.value    = false
+    spectatorCount.value = 0
     if (pauseTimer !== null) { clearTimeout(pauseTimer); pauseTimer = null }
   }
 
@@ -217,6 +232,7 @@ export const useGameStore = defineStore('game', () => {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
     partnerRevealedSeat, seats, lobbyChat, queueStatus, roomCode, showCatchUp,
+    isSpectator, spectatorCount,
     // derived
     phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName, isLobby,
     // actions

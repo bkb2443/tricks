@@ -11,9 +11,8 @@ pub use room::Room;
 use crate::games;
 
 const WORDS: &[&str] = &[
-    "WOLF", "BEAR", "HAWK", "DUCK", "DEER", "CROW", "FROG", "LYNX",
-    "MOOSE", "PIKE", "LARK", "WREN", "NEWT", "MINK", "VOLE", "IBIS",
-    "KITE", "TEAL", "DOVE", "SWAN",
+    "WOLF", "BEAR", "HAWK", "DUCK", "DEER", "CROW", "FROG", "LYNX", "MOOSE", "PIKE", "LARK",
+    "WREN", "NEWT", "MINK", "VOLE", "IBIS", "KITE", "TEAL", "DOVE", "SWAN",
 ];
 
 pub fn generate_room_code() -> String {
@@ -88,7 +87,10 @@ mod tests {
         let parts: Vec<&str> = code.split('-').collect();
         assert_eq!(parts.len(), 2, "code should be WORD-NN format, got: {code}");
         let num: u32 = parts[1].parse().expect("second part should be a number");
-        assert!((10..=99).contains(&num), "number should be 10-99, got: {num}");
+        assert!(
+            (10..=99).contains(&num),
+            "number should be 10-99, got: {num}"
+        );
         assert!(parts[0].len() >= 3, "word should be at least 3 chars");
     }
 
