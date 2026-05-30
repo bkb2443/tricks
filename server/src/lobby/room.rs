@@ -3,14 +3,16 @@
 #![allow(dead_code)]
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc};
 use uuid::Uuid;
 
-use crate::engine::{Card, GamePhase, GameState, PlayResult, SeatInfo, StateUpdate, deal_game};
 use crate::engine::game::Game;
+use crate::engine::{
+    Card, GameMeta, GamePhase, GameState, PlayResult, SeatInfo, StateUpdate, deal_game,
+};
 
 // ── Seat model ───────────────────────────────────────────────────────────────
 
@@ -24,7 +26,9 @@ enum SeatState {
     /// A bot seat. `original_name` is `Some` when the bot is substituting for a
     /// disconnected human (preserving the name for potential rejoin); `None` for
     /// seats that were always bots.
-    Bot { original_name: Option<String> },
+    Bot {
+        original_name: Option<String>,
+    },
     Disconnected {
         name: String,
         rejoin_deadline: std::time::Instant,
@@ -34,15 +38,23 @@ enum SeatState {
 }
 
 impl SeatState {
-    fn is_empty(&self) -> bool { matches!(self, SeatState::Empty) }
-    fn is_human(&self) -> bool { matches!(self, SeatState::Human { .. }) }
-    fn is_bot(&self) -> bool { matches!(self, SeatState::Bot { .. }) }
+    fn is_empty(&self) -> bool {
+        matches!(self, SeatState::Empty)
+    }
+    fn is_human(&self) -> bool {
+        matches!(self, SeatState::Human { .. })
+    }
+    fn is_bot(&self) -> bool {
+        matches!(self, SeatState::Bot { .. })
+    }
 
     fn name(&self) -> Option<&str> {
         match self {
             SeatState::Human { name, .. } => Some(name),
             SeatState::Disconnected { name, .. } => Some(name),
-            SeatState::Bot { original_name: Some(name) } => Some(name.as_str()),
+            SeatState::Bot {
+                original_name: Some(name),
+            } => Some(name.as_str()),
             _ => None,
         }
     }
@@ -68,7 +80,11 @@ impl SeatState {
             SeatState::Bot { original_name } => ("bot", original_name.clone()),
             SeatState::Disconnected { name, .. } => ("disconnected", Some(name.clone())),
         };
-        SeatInfo { seat, state: state_str.into(), name }
+        SeatInfo {
+            seat,
+            state: state_str.into(),
+            name,
+        }
     }
 }
 
@@ -146,7 +162,11 @@ impl Room {
 
     fn seat_infos(&self) -> Vec<SeatInfo> {
         let seats = self.seats.lock().unwrap();
-        seats.iter().enumerate().map(|(i, s)| s.to_seat_info(i)).collect()
+        seats
+            .iter()
+            .enumerate()
+            .map(|(i, s)| s.to_seat_info(i))
+            .collect()
     }
 
     fn host_seat(&self) -> Option<usize> {
@@ -180,10 +200,16 @@ impl Room {
             let mut seats = self.seats.lock().unwrap();
             // Name uniqueness check (Human + Disconnected seats reserve their name)
             let name_taken = seats.iter().any(|s| s.name() == Some(name.as_str()));
-            if name_taken { return None; }
+            if name_taken {
+                return None;
+            }
 
             seat = seats.iter().position(|s| s.is_empty())?;
-            seats[seat] = SeatState::Human { name: name.clone(), ws_id, tx: tx.clone() };
+            seats[seat] = SeatState::Human {
+                name: name.clone(),
+                ws_id,
+                tx: tx.clone(),
+            };
         }
 
         // Update lobby GameState names and host
@@ -191,8 +217,10 @@ impl Room {
             let mut guard = self.state.lock().unwrap();
             if let Some(ref mut state) = *guard {
                 state.names = self.compute_names();
-                if state.meta["host_seat"].is_null() {
-                    state.meta["host_seat"] = serde_json::json!(seat);
+                if let GameMeta::Lobby(ref mut lm) = state.meta
+                    && lm.host_seat.is_none()
+                {
+                    lm.host_seat = Some(seat);
                 }
             }
         }
@@ -201,7 +229,9 @@ impl Room {
         // there is nothing to hide — go through the helper for consistency).
         let snapshot = {
             let guard = self.state.lock().unwrap();
-            guard.as_ref().map(|s| s.redacted_for(seat, self.game.as_ref()))
+            guard
+                .as_ref()
+                .map(|s| s.redacted_for(seat, self.game.as_ref()))
         };
         if let Some(state) = snapshot {
             let _ = tx.try_send(StateUpdate::Snapshot { state });
@@ -229,7 +259,10 @@ impl Room {
     }
 
     /// Legacy path for solo mode (fill_bots). Kept for backward compat.
-    pub fn join(&self, tx: mpsc::Sender<StateUpdate>) -> Option<(usize, broadcast::Receiver<StateUpdate>)> {
+    pub fn join(
+        &self,
+        tx: mpsc::Sender<StateUpdate>,
+    ) -> Option<(usize, broadcast::Receiver<StateUpdate>)> {
         let seat;
         let all_filled;
         {
@@ -242,7 +275,9 @@ impl Room {
             };
             all_filled = seats.iter().all(|s| !s.is_empty());
         }
-        if all_filled { self.start_game_inner(); }
+        if all_filled {
+            self.start_game_inner();
+        }
         Some((seat, self.broadcast_tx.subscribe()))
     }
 
@@ -284,12 +319,18 @@ impl Room {
     // ── Lobby chat ────────────────────────────────────────────────────────────
 
     pub fn handle_lobby_chat(&self, seat: usize, text: String) -> Result<(), String> {
-        if text.is_empty() { return Err("message cannot be empty".into()); }
-        if text.len() > 200 { return Err("message too long (max 200 chars)".into()); }
+        if text.is_empty() {
+            return Err("message cannot be empty".into());
+        }
+        if text.len() > 200 {
+            return Err("message too long (max 200 chars)".into());
+        }
 
         let from = {
             let seats = self.seats.lock().unwrap();
-            seats.get(seat).and_then(|s| s.name().map(|n| n.to_string()))
+            seats
+                .get(seat)
+                .and_then(|s| s.name().map(|n| n.to_string()))
                 .unwrap_or_else(|| format!("Seat {seat}"))
         };
         let timestamp = SystemTime::now()
@@ -300,10 +341,16 @@ impl Room {
         {
             let mut history = self.chat_history.lock().unwrap();
             history.push_back((from.clone(), text.clone(), timestamp));
-            if history.len() > 50 { history.pop_front(); }
+            if history.len() > 50 {
+                history.pop_front();
+            }
         }
 
-        self.broadcast(StateUpdate::LobbyChat { from, text, timestamp });
+        self.broadcast(StateUpdate::LobbyChat {
+            from,
+            text,
+            timestamp,
+        });
         Ok(())
     }
 
@@ -314,9 +361,15 @@ impl Room {
             .as_millis() as u64;
         let mut history = self.chat_history.lock().unwrap();
         history.push_back(("System".into(), text.clone(), timestamp));
-        if history.len() > 50 { history.pop_front(); }
+        if history.len() > 50 {
+            history.pop_front();
+        }
         drop(history);
-        self.broadcast(StateUpdate::LobbyChat { from: "System".into(), text, timestamp });
+        self.broadcast(StateUpdate::LobbyChat {
+            from: "System".into(),
+            text,
+            timestamp,
+        });
     }
 
     // ── Game start ────────────────────────────────────────────────────────────
@@ -326,7 +379,11 @@ impl Room {
         {
             let mut seats = self.seats.lock().unwrap();
             for s in seats.iter_mut() {
-                if s.is_empty() { *s = SeatState::Bot { original_name: None }; }
+                if s.is_empty() {
+                    *s = SeatState::Bot {
+                        original_name: None,
+                    };
+                }
             }
         }
         self.start_game_inner();
@@ -340,7 +397,11 @@ impl Room {
         {
             let mut seats = self.seats.lock().unwrap();
             for s in seats.iter_mut() {
-                if s.is_empty() { *s = SeatState::Bot { original_name: None }; }
+                if s.is_empty() {
+                    *s = SeatState::Bot {
+                        original_name: None,
+                    };
+                }
             }
         }
     }
@@ -362,13 +423,20 @@ impl Room {
     pub fn on_disconnect(self: &Arc<Self>, seat: usize, ws_id: Uuid) {
         let is_lobby = {
             let guard = self.state.lock().unwrap();
-            guard.as_ref().map(|s| s.phase == GamePhase::Lobby).unwrap_or(true)
+            guard
+                .as_ref()
+                .map(|s| s.phase == GamePhase::Lobby)
+                .unwrap_or(true)
         };
 
         let name = {
             let seats = self.seats.lock().unwrap();
             seats.get(seat).and_then(|s| {
-                if s.ws_id() == Some(ws_id) { s.name().map(|n| n.to_string()) } else { None }
+                if s.ws_id() == Some(ws_id) {
+                    s.name().map(|n| n.to_string())
+                } else {
+                    None
+                }
             })
         };
         let Some(name) = name else { return };
@@ -385,7 +453,11 @@ impl Room {
             {
                 let mut seats = self.seats.lock().unwrap();
                 if let Some(s) = seats.get_mut(seat) {
-                    *s = SeatState::Disconnected { name: name.clone(), rejoin_deadline: deadline, extend_used: false };
+                    *s = SeatState::Disconnected {
+                        name: name.clone(),
+                        rejoin_deadline: deadline,
+                        extend_used: false,
+                    };
                 }
             }
             self.broadcast(self.seat_update());
@@ -409,7 +481,9 @@ impl Room {
             {
                 let mut seats = self.seats.lock().unwrap();
                 if let Some(s) = seats.get_mut(seat) {
-                    *s = SeatState::Bot { original_name: Some(expected_name.to_string()) };
+                    *s = SeatState::Bot {
+                        original_name: Some(expected_name.to_string()),
+                    };
                 }
             }
             self.broadcast(self.seat_update());
@@ -437,18 +511,26 @@ impl Room {
                 Some(SeatState::Bot { original_name: Some(n) }) if n == name);
             disconnected_ok || bot_sub_ok
         };
-        if !can_rejoin { return false; }
+        if !can_rejoin {
+            return false;
+        }
 
         {
             let mut seats = self.seats.lock().unwrap();
             if let Some(s) = seats.get_mut(seat) {
-                *s = SeatState::Human { name: name.to_string(), ws_id, tx: tx.clone() };
+                *s = SeatState::Human {
+                    name: name.to_string(),
+                    ws_id,
+                    tx: tx.clone(),
+                };
             }
         }
 
         let snapshot = {
             let guard = self.state.lock().unwrap();
-            guard.as_ref().map(|s| s.redacted_for(seat, self.game.as_ref()))
+            guard
+                .as_ref()
+                .map(|s| s.redacted_for(seat, self.game.as_ref()))
         };
         if let Some(state) = snapshot {
             let _ = tx.try_send(StateUpdate::Snapshot { state });
@@ -480,8 +562,14 @@ impl Room {
         }
         let mut seats = self.seats.lock().unwrap();
         match seats.get_mut(seat) {
-            Some(SeatState::Disconnected { rejoin_deadline, extend_used, .. }) => {
-                if *extend_used { return Err("extend already used for this seat".into()); }
+            Some(SeatState::Disconnected {
+                rejoin_deadline,
+                extend_used,
+                ..
+            }) => {
+                if *extend_used {
+                    return Err("extend already used for this seat".into());
+                }
                 *rejoin_deadline += std::time::Duration::from_secs(30);
                 *extend_used = true;
                 Ok(())
@@ -495,22 +583,33 @@ impl Room {
     pub fn apply_bid(&self, seat: usize, value: serde_json::Value) -> Result<(), String> {
         let (result, current_player) = {
             let mut guard = self.state.lock().unwrap();
-            let state = guard.as_mut().ok_or_else(|| "game not started".to_string())?;
+            let state = guard
+                .as_mut()
+                .ok_or_else(|| "game not started".to_string())?;
             let result = self.game.apply_bid(state, seat, &value)?;
             let cp = state.current_player;
             (result, cp)
         };
         let bid_value = result.broadcast_payload.unwrap_or(value);
-        self.broadcast(StateUpdate::BidPlaced { player: seat, value: bid_value, current_player });
+        self.broadcast(StateUpdate::BidPlaced {
+            player: seat,
+            value: bid_value,
+            current_player,
+        });
         if let Some(updated_seat) = result.hand_updated_seat {
             let hand = {
                 let guard = self.state.lock().unwrap();
-                guard.as_ref().map(|s| s.hands[updated_seat].clone()).unwrap_or_default()
+                guard
+                    .as_ref()
+                    .map(|s| s.hands[updated_seat].clone())
+                    .unwrap_or_default()
             };
             self.send_private(updated_seat, StateUpdate::HandUpdated { hand });
         }
         if result.phase_complete {
-            self.broadcast(StateUpdate::PhaseChanged { phase: GamePhase::Playing });
+            self.broadcast(StateUpdate::PhaseChanged {
+                phase: GamePhase::Playing,
+            });
         }
         Ok(())
     }
@@ -518,11 +617,22 @@ impl Room {
     pub fn play_card(&self, seat: usize, card: Card) -> Result<(), String> {
         let (result, newly_revealed_partner, current_trick_winner, next_player) = {
             let mut guard = self.state.lock().unwrap();
-            let state = guard.as_mut().ok_or_else(|| "game not started".to_string())?;
-            let partner_was_null = state.meta["partner"].is_null();
+            let state = guard
+                .as_mut()
+                .ok_or_else(|| "game not started".to_string())?;
+            // Read the Sheepshead partner field before applying the play
+            let partner_before = if let GameMeta::Sheepshead(ref m) = state.meta {
+                m.partner
+            } else {
+                None
+            };
             let result = self.game.apply_play(state, seat, card)?;
-            let newly_revealed = if partner_was_null && !state.meta["partner"].is_null() {
-                state.meta["partner"].as_u64().map(|p| p as usize)
+            let newly_revealed = if partner_before.is_none() {
+                if let GameMeta::Sheepshead(ref m) = state.meta {
+                    m.partner
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -536,7 +646,12 @@ impl Room {
             (result, newly_revealed, winner, state.current_player)
         };
 
-        self.broadcast(StateUpdate::CardPlayed { player: seat, card, current_trick_winner, next_player });
+        self.broadcast(StateUpdate::CardPlayed {
+            player: seat,
+            card,
+            current_trick_winner,
+            next_player,
+        });
 
         if let Some(partner_seat) = newly_revealed_partner {
             self.broadcast(StateUpdate::PartnerRevealed { seat: partner_seat });
@@ -547,14 +662,20 @@ impl Room {
             PlayResult::TrickComplete { winner, points } => {
                 self.broadcast(StateUpdate::TrickComplete { winner, points });
             }
-            PlayResult::GameOver { last_trick_winner, last_trick_points, scores } => {
+            PlayResult::GameOver {
+                last_trick_winner,
+                last_trick_points,
+                scores,
+            } => {
                 self.broadcast(StateUpdate::TrickComplete {
                     winner: last_trick_winner,
                     points: last_trick_points,
                 });
                 let session_scores = {
                     let mut ss = self.session_scores.lock().unwrap();
-                    for (i, &delta) in scores.iter().enumerate() { ss[i] += delta; }
+                    for (i, &delta) in scores.iter().enumerate() {
+                        ss[i] += delta;
+                    }
                     ss.clone()
                 };
                 let mut hp = self.hands_played.lock().unwrap();
@@ -572,7 +693,8 @@ impl Room {
                     let max_h = *self.max_hands.lock().unwrap();
                     let default_max = self.game.default_max_hands();
                     let hand_limit = max_h.or(default_max);
-                    let hands_limit_reached = hand_limit.is_some_and(|max| hands_done >= max as usize);
+                    let hands_limit_reached =
+                        hand_limit.is_some_and(|max| hands_done >= max as usize);
                     hands_limit_reached || self.game.match_over(&session_scores, hands_done)
                 };
 
@@ -599,7 +721,9 @@ impl Room {
                         state.phase = GamePhase::Intermission;
                     }
                 }
-                self.broadcast(StateUpdate::PhaseChanged { phase: GamePhase::Intermission });
+                self.broadcast(StateUpdate::PhaseChanged {
+                    phase: GamePhase::Intermission,
+                });
             }
         }
         Ok(())
@@ -628,13 +752,19 @@ impl Room {
         let (all_bots, next_dealer_is_human) = {
             let seats = self.seats.lock().unwrap();
             let all_bots = seats.iter().all(|s| s.is_bot());
-            let nd_human = seats.get(next_dealer).map(|s| s.is_human()).unwrap_or(false);
+            let nd_human = seats
+                .get(next_dealer)
+                .map(|s| s.is_human())
+                .unwrap_or(false);
             (all_bots, nd_human)
         };
         if !all_bots {
             let requester_is_human = {
                 let seats = self.seats.lock().unwrap();
-                seats.get(requesting_seat).map(|s| s.is_human()).unwrap_or(false)
+                seats
+                    .get(requesting_seat)
+                    .map(|s| s.is_human())
+                    .unwrap_or(false)
             };
             if next_dealer_is_human && requesting_seat != next_dealer {
                 return Err("only the next dealer can start the next hand".into());
@@ -662,9 +792,15 @@ impl Room {
     const BOT_ACTION_DELAY_MS: u64 = 1200;
 
     pub async fn drive_bots(self: &Arc<Self>) {
-        if self.bots_running.swap(true, Ordering::SeqCst) { return; }
+        if self.bots_running.swap(true, Ordering::SeqCst) {
+            return;
+        }
         struct Guard<'a>(&'a AtomicBool);
-        impl Drop for Guard<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
         let _guard = Guard(&self.bots_running);
 
         loop {
@@ -677,9 +813,13 @@ impl Room {
             // After play_card sets Scoring, it immediately transitions to Intermission
             // or SessionOver. Break here so the next drive_bots invocation picks up the
             // correct phase.
-            if phase == GamePhase::Scoring { break; }
+            if phase == GamePhase::Scoring {
+                break;
+            }
 
-            if phase == GamePhase::Lobby { break; }
+            if phase == GamePhase::Lobby {
+                break;
+            }
 
             // In Intermission, bots auto-advance only when there are no humans present.
             if phase == GamePhase::Intermission {
@@ -687,8 +827,11 @@ impl Room {
                     let seats = self.seats.lock().unwrap();
                     seats.iter().any(|s| s.is_human())
                 };
-                if has_human { break; } // wait for the human next-dealer to click
-                tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
+                if has_human {
+                    break;
+                } // wait for the human next-dealer to click
+                tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS))
+                    .await;
                 let next_dealer = (dealer + 1) % self.player_count;
                 self.start_next_hand(next_dealer);
                 continue;
@@ -698,7 +841,9 @@ impl Room {
                 let seats = self.seats.lock().unwrap();
                 seats.get(seat).map(|s| s.is_bot()).unwrap_or(false)
             };
-            if !is_bot { break; }
+            if !is_bot {
+                break;
+            }
 
             tokio::time::sleep(std::time::Duration::from_millis(Self::BOT_ACTION_DELAY_MS)).await;
 
@@ -708,7 +853,9 @@ impl Room {
                     let Some(state) = guard.as_ref() else { break };
                     crate::bot::bid_action(state, seat)
                 };
-                if self.apply_bid(seat, value).is_err() { break; }
+                if self.apply_bid(seat, value).is_err() {
+                    break;
+                }
             } else {
                 let card = {
                     let guard = self.state.lock().unwrap();
@@ -718,7 +865,9 @@ impl Room {
                         None => break,
                     }
                 };
-                if self.play_card(seat, card).is_err() { break; }
+                if self.play_card(seat, card).is_err() {
+                    break;
+                }
             }
         }
     }
@@ -732,7 +881,9 @@ impl Room {
             for s in seats.iter_mut() {
                 if let SeatState::Disconnected { name, .. } = s {
                     let name = name.clone();
-                    *s = SeatState::Bot { original_name: Some(name) };
+                    *s = SeatState::Bot {
+                        original_name: Some(name),
+                    };
                 }
             }
         }
@@ -765,13 +916,23 @@ impl Room {
     fn compute_names(&self) -> Vec<String> {
         let seats = self.seats.lock().unwrap();
         let mut bot_counter = 0usize;
-        seats.iter().map(|s| match s {
-            SeatState::Human { name, .. } => name.clone(),
-            SeatState::Disconnected { name, .. } => name.clone(),
-            SeatState::Bot { original_name: Some(name) } => name.clone(),
-            SeatState::Bot { original_name: None } => { bot_counter += 1; format!("Bot {bot_counter}") }
-            SeatState::Empty => "Empty".into(),
-        }).collect()
+        seats
+            .iter()
+            .map(|s| match s {
+                SeatState::Human { name, .. } => name.clone(),
+                SeatState::Disconnected { name, .. } => name.clone(),
+                SeatState::Bot {
+                    original_name: Some(name),
+                } => name.clone(),
+                SeatState::Bot {
+                    original_name: None,
+                } => {
+                    bot_counter += 1;
+                    format!("Bot {bot_counter}")
+                }
+                SeatState::Empty => "Empty".into(),
+            })
+            .collect()
     }
 }
 
@@ -808,8 +969,12 @@ mod tests {
         let room = make_room();
         let (tx1, _) = tokio::sync::mpsc::channel(16);
         let (tx2, _) = tokio::sync::mpsc::channel(16);
-        room.join_lobby("Alice".into(), Uuid::new_v4(), tx1).unwrap();
-        assert!(room.join_lobby("Alice".into(), Uuid::new_v4(), tx2).is_none());
+        room.join_lobby("Alice".into(), Uuid::new_v4(), tx1)
+            .unwrap();
+        assert!(
+            room.join_lobby("Alice".into(), Uuid::new_v4(), tx2)
+                .is_none()
+        );
     }
 
     #[test]

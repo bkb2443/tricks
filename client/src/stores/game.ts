@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Trick } from '@/engine/types'
+import type { Card, GamePhase, GameState, SeatInfo, StateUpdate, Trick, GameMeta } from '@/engine/types'
 
 export const useGameStore = defineStore('game', () => {
   // ── State ─────────────────────────────────────────────────────────────────
@@ -33,8 +33,9 @@ export const useGameStore = defineStore('game', () => {
 
   /** Seat of the Sheepshead picker, or null if nobody has picked yet. */
   const picker = computed<number | null>(() => {
-    const p = gameState.value?.meta?.picker
-    return typeof p === 'number' ? p : null
+    const meta = gameState.value?.meta
+    if (meta?.kind === 'sheepshead') return meta.picker ?? null
+    return null
   })
 
   const isPicker = computed(
@@ -151,11 +152,8 @@ export const useGameStore = defineStore('game', () => {
           gameState.value.current_player = update.current_player
           // Merge any game-metadata included in the bid payload (e.g. sub_phase, callable_suits
           // when transitioning to the calling sub-phase after bury).
-          if (typeof update.value === 'object' && update.value !== null) {
-            gameState.value.meta = {
-              ...gameState.value.meta,
-              ...(update.value as Record<string, unknown>),
-            }
+          if (update.value && typeof update.value === 'object' && !Array.isArray(update.value)) {
+            gameState.value.meta = { ...gameState.value.meta, ...(update.value as object) } as GameMeta
           }
         }
         break
@@ -172,7 +170,10 @@ export const useGameStore = defineStore('game', () => {
 
       case 'partner_revealed':
         if (gameState.value) {
-          gameState.value.meta = { ...gameState.value.meta, partner: update.seat }
+          const m = gameState.value.meta
+          if (m.kind === 'sheepshead') {
+            gameState.value.meta = { ...m, partner: update.seat }
+          }
         }
         partnerRevealedSeat.value = update.seat
         setTimeout(() => { partnerRevealedSeat.value = null }, 2000)

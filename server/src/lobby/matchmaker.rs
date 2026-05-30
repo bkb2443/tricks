@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::engine::StateUpdate;
+use crate::engine::{GameMeta, StateUpdate};
 use crate::lobby::Lobby;
 
 const QUEUE_TIMEOUT_SECS: u64 = 60;
@@ -38,7 +38,11 @@ impl Matchmaker {
         let should_start_timer;
         {
             let mut q = self.queue.lock().unwrap();
-            q.push(QueueEntry { name, tx: tx.clone(), ws_id });
+            q.push(QueueEntry {
+                name,
+                tx: tx.clone(),
+                ws_id,
+            });
             position = q.len();
             should_start_timer = position == 1;
 
@@ -49,8 +53,13 @@ impl Matchmaker {
         }
 
         let waiting_since = SystemTime::now()
-            .duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-        let _ = tx.try_send(StateUpdate::QueueStatus { position, waiting_since });
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let _ = tx.try_send(StateUpdate::QueueStatus {
+            position,
+            waiting_since,
+        });
 
         if should_start_timer {
             let mm = Arc::clone(self);
@@ -85,8 +94,10 @@ impl Matchmaker {
         room.set_max_hands(PUBLIC_MAX_HANDS);
         {
             let mut guard = room.state.lock().unwrap();
-            if let Some(ref mut state) = *guard {
-                state.meta["room_type"] = serde_json::json!("public");
+            if let Some(ref mut state) = *guard
+                && let GameMeta::Lobby(ref mut lm) = state.meta
+            {
+                lm.room_type = "public".into();
             }
         }
 
@@ -94,7 +105,9 @@ impl Matchmaker {
         let room_id = room.id;
         for entry in entries {
             let result = room.join_lobby(entry.name, entry.ws_id, entry.tx.clone());
-            let Some((seat, _broadcast_rx)) = result else { continue };
+            let Some((seat, _broadcast_rx)) = result else {
+                continue;
+            };
             let _ = entry.tx.try_send(StateUpdate::JoinedRoom {
                 room_id,
                 seat,

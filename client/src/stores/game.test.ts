@@ -16,7 +16,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     current_trick: null,
     completed_tricks: [],
     scores: [0, 0, 0, 0, 0],
-    meta: { picker: null, passed: 0, buried: [], leaster: false },
+    session_scores: [0, 0, 0, 0, 0],
+    meta: { kind: 'sheepshead', picker: null, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null },
     names: [],
     ...overrides,
   }
@@ -249,7 +250,8 @@ describe('game store', () => {
 
     expect(store.picker).toBe(2)
     expect(store.isPicker).toBe(true)
-    expect(store.gameState?.meta?.sub_phase).toBe('burying')
+    const meta = store.gameState?.meta
+    expect(meta?.kind === 'sheepshead' ? meta.sub_phase : null).toBe('burying')
   })
 
   it('bid_placed for bury advances current_player to first trick leader', () => {
@@ -257,7 +259,7 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 2, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
-      state: makeState({ dealer: 1, current_player: 2, meta: { picker: 2, passed: 0, buried: [], leaster: false } }),
+      state: makeState({ dealer: 1, current_player: 2, meta: { kind: 'sheepshead', picker: 2, passed: 0, buried: [], leaster: false, sub_phase: 'burying', callable_suits: [], called_suit: null, going_alone: false, partner: null } }),
     })
 
     // After bury, server sets current_player to (dealer+1) % 5 = 2
@@ -319,7 +321,7 @@ describe('game store', () => {
     store.handleUpdate({ type: 'joined_room', room_id: 'r', seat: 1, room_code: 'TEST01' })
     store.handleUpdate({
       type: 'snapshot',
-      state: makeState({ meta: { picker: 1, passed: 0, buried: [], leaster: false } }),
+      state: makeState({ meta: { kind: 'sheepshead', picker: 1, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null } }),
     })
     expect(store.picker).toBe(1)
     expect(store.isPicker).toBe(true)

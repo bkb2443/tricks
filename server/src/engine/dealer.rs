@@ -12,5 +12,9 @@ pub fn deal_game(game: &dyn Game, state: &mut GameState, rng: &mut impl rand::Rn
     state.hands = result.hands;
     state.extra_piles = result.extra_piles;
     state.meta = result.initial_meta;
-    state.phase = if game.has_bidding() { GamePhase::Bidding } else { GamePhase::Playing };
+    state.phase = if game.has_bidding() {
+        GamePhase::Bidding
+    } else {
+        GamePhase::Playing
+    };
 }

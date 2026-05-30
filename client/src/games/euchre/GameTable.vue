@@ -17,6 +17,11 @@ const { playerName } = store
 const { playCard, startNextHand } = useGame()
 const { callerSeat, sitsOut, calledSuit } = useEuchreState()
 
+const goingAlone = computed<boolean>(() => {
+  const m = store.gameState?.meta
+  return m?.kind === 'euchre' ? m.going_alone : false
+})
+
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 const state = computed(() => store.gameState!)
 const seat  = computed(() => store.seat ?? 0)
@@ -158,7 +163,7 @@ watch(
       <div class="my-hand-label">
         Your hand (seat {{ seat }})
         <span v-if="seat === callerSeat" class="badge caller-badge">Caller</span>
-        <span v-if="seat === callerSeat && state.meta?.going_alone" class="badge alone-badge">Alone</span>
+        <span v-if="seat === callerSeat && goingAlone" class="badge alone-badge">Alone</span>
         <span v-if="seat === state.dealer" class="badge">Dealer</span>
         <span v-if="calledSuit" class="badge trump-badge">
           Trump: {{ SUIT_SYMBOLS[calledSuit] ?? calledSuit }}
