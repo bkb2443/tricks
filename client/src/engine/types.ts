@@ -6,64 +6,64 @@ type JsonValue = number | string | boolean | null | JsonValue[] | { [key: string
 export type Suit = "clubs" | "spades" | "hearts" | "diamonds";
 export type Rank = "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten" | "jack" | "queen" | "king" | "ace";
 export type Card = { suit: Suit, rank: Rank, };
-export type Trick = {
+export type Trick = { 
 /**
  * Index of the player who led this trick.
  */
-led_by: number,
+led_by: number, 
 /**
  * Cards played in order: (player_index, card).
  */
-plays: Array<[number, Card]>,
+plays: Array<[number, Card]>, 
 /**
  * Seat of the player who won this trick. Set when the trick completes.
  */
 winner: number | null, };
 export type GamePhase = "lobby" | "bidding" | "playing" | "scoring" | "intermission";
-export type SeatInfo = { seat: number,
+export type SeatInfo = { seat: number, 
 /**
  * "empty" | "human" | "bot" | "disconnected"
  */
 state: string, name: string | null, };
 export type LobbyMeta = { host_seat: number | null, countdown_ends_at: number | null, room_type: string, max_hands: number | null, };
-export type SheepsheadMeta = { picker: number | null,
+export type SheepsheadMeta = { picker: number | null, 
 /**
  * "picking" | "burying" | "calling" | "done"
  */
 sub_phase: string, passed: number, leaster: boolean, buried: Array<Card>, callable_suits: Array<string>, called_suit: string | null, going_alone: boolean, partner: number | null, };
-export type EuchreMeta = { turned_up_card: Card | null,
+export type EuchreMeta = { turned_up_card: Card | null, 
 /**
  * "ordering" | "discarding" | "calling" | "done"
  */
 sub_phase: string, passed_round1: number, passed_round2: number, caller_seat: number | null, called_suit: string | null, going_alone: boolean, sits_out: number | null, };
 export type GameMeta = { "kind": "none" } | { "kind": "lobby" } & LobbyMeta | { "kind": "sheepshead" } & SheepsheadMeta | { "kind": "euchre" } & EuchreMeta;
-export type GameState = { game_id: string, game_name: string, phase: GamePhase, player_count: number,
+export type GameState = { game_id: string, game_name: string, phase: GamePhase, player_count: number, 
 /**
  * Seat index of the player who dealt this hand.
  */
-dealer: number,
+dealer: number, 
 /**
  * Index of the player whose turn it is.
  */
-current_player: number,
+current_player: number, 
 /**
  * `hands[i]` = cards currently held by player i. Clients only see their own hand.
  */
-hands: Array<Array<Card>>,
+hands: Array<Array<Card>>, 
 /**
  * Named side piles (e.g. Sheepshead blind, Euchre kitty). Hidden from clients
  * until game-specific rules expose them (e.g. picker takes the blind).
  */
-extra_piles: Array<[string, Array<Card>]>, current_trick: Trick | null, completed_tricks: Array<Trick>, scores: Array<number>,
+extra_piles: Array<[string, Array<Card>]>, current_trick: Trick | null, completed_tricks: Array<Trick>, scores: Array<number>, 
 /**
  * Cumulative per-player scores across all hands played so far in this session.
  */
-session_scores: Array<number>,
+session_scores: Array<number>, 
 /**
  * Game-specific metadata. Typed via `GameMeta` so the TypeScript client
  * receives a discriminated union rather than `unknown`.
  */
-meta: GameMeta,
+meta: GameMeta, 
 /**
  * Display name for each seat. Populated by the room before the first Snapshot.
  */
