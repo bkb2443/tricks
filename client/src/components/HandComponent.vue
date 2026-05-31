@@ -9,6 +9,9 @@ const props = defineProps<{
   selectable?: boolean
   selectedCards?: Card[]
   sortFn?: (cards: Card[]) => Card[]
+  legalCards?: Card[]
+  hintCard?: Card | null
+  showTraining?: boolean
 }>()
 
 const emit = defineEmits<{ select: [card: Card] }>()
@@ -22,6 +25,24 @@ function isSelected(card: Card): boolean {
     ) ?? false
   )
 }
+
+function isLegal(card: Card): boolean {
+  if (!props.showTraining || !props.legalCards?.length) return false
+  return props.legalCards.some(c => c.suit === card.suit && c.rank === card.rank)
+}
+
+function isIllegal(card: Card): boolean {
+  if (!props.showTraining) return false
+  const legal = props.legalCards ?? []
+  if (legal.length === 0) return false
+  return !legal.some(c => c.suit === card.suit && c.rank === card.rank)
+}
+
+function isHint(card: Card): boolean {
+  const h = props.hintCard
+  if (!h) return false
+  return h.suit === card.suit && h.rank === card.rank
+}
 </script>
 
 <template>
@@ -32,6 +53,9 @@ function isSelected(card: Card): boolean {
       :card="card"
       :selectable="selectable"
       :selected="isSelected(card)"
+      :legal="isLegal(card)"
+      :illegal="isIllegal(card)"
+      :hint="isHint(card)"
       @select="emit('select', $event)"
     />
     <p v-if="cards.length === 0" class="empty">No cards</p>

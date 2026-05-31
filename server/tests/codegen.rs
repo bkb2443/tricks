@@ -11,7 +11,7 @@ fn export_typescript_bindings() {
     // Import types from the library crate
     use tricks_server::engine::bid::BidPayload;
     use tricks_server::engine::meta::{EuchreMeta, LobbyMeta, SheepsheadMeta};
-    use tricks_server::engine::state::{ClientMessage, SeatInfo};
+    use tricks_server::engine::state::{ChatMessage, ClientMessage, HintCard, SeatInfo};
     use tricks_server::engine::{
         Card, GameMeta, GamePhase, GameState, Rank, StateUpdate, Suit, Trick,
     };
@@ -45,10 +45,12 @@ fn export_typescript_bindings() {
     output.push_str(&to_export(Trick::decl()));
     output.push_str(&to_export(GamePhase::decl()));
     output.push_str(&to_export(SeatInfo::decl()));
+    output.push_str(&to_export(ChatMessage::decl()));
     output.push_str(&to_export(LobbyMeta::decl()));
     output.push_str(&to_export(SheepsheadMeta::decl()));
     output.push_str(&to_export(EuchreMeta::decl()));
     output.push_str(&to_export(GameMeta::decl()));
+    output.push_str(&to_export(HintCard::decl()));
     output.push_str(&to_export(GameState::decl()));
     output.push_str(&to_export(BidPayload::decl()));
     output.push_str(&to_export(ClientMessage::decl()));

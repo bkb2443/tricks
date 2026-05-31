@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGame } from '@/composables/useGame'
 import { connected } from '@/engine/socket'
 import { GAMES, getGameInfo } from '@/engine/games'
 
 const router = useRouter()
-const { createSoloRoom, joinWithCode, spectateRoom, joinQueue, createPrivateRoom } = useGame()
+const { createSoloRoom, createSoloTrainingRoom, createSoloTutorialRoom, joinWithCode, spectateRoom, joinQueue, createPrivateRoom } = useGame()
 
 const guestName = ref(localStorage.getItem('guestName') ?? '')
 const joinCode  = ref('')
@@ -23,9 +23,38 @@ function saveName() {
   return true
 }
 
+const trainingMode = ref(false)
+const tutorials = ref<{ id: string; title: string; description: string }[]>([])
+const tutorialsLoading = ref(false)
+
+watch([selectedGame, trainingMode], async ([game, training]) => {
+  if (!training) return
+  tutorialsLoading.value = true
+  try {
+    const res = await fetch(`/api/training/tutorials/${game}`)
+    tutorials.value = await res.json()
+  } catch {
+    tutorials.value = []
+  } finally {
+    tutorialsLoading.value = false
+  }
+}, { immediate: false })
+
 function handleSolo() {
   if (!saveName()) return
   createSoloRoom(selectedGame.value, selectedGameInfo.value.playerCount)
+  router.push('/game')
+}
+
+function handleTraining() {
+  if (!saveName()) return
+  createSoloTrainingRoom(selectedGame.value, selectedGameInfo.value.playerCount)
+  router.push('/game')
+}
+
+function handleTutorial(tutorialId: string) {
+  if (!saveName()) return
+  createSoloTutorialRoom(selectedGame.value, selectedGameInfo.value.playerCount, tutorialId)
   router.push('/game')
 }
 
@@ -93,11 +122,51 @@ onMounted(() => {
 
     <!-- Solo -->
     <section class="solo">
-      <div class="solo-text">
-        <h2>Play Solo</h2>
-        <p>You vs {{ selectedGameInfo.playerCount - 1 }} bots — starts immediately.</p>
+      <div class="solo-top">
+        <div class="solo-text">
+          <h2>Play Solo</h2>
+          <p>You vs {{ selectedGameInfo.playerCount - 1 }} bots — starts immediately.</p>
+        </div>
+        <div class="solo-actions">
+          <button class="btn-solo" :disabled="!connected" @click="handleSolo">Play Solo →</button>
+        </div>
       </div>
-      <button class="btn-solo" :disabled="!connected" @click="handleSolo">Play Solo →</button>
+
+      <!-- Training mode toggle -->
+      <div class="training-toggle-row">
+        <label class="toggle-label">
+          <input v-model="trainingMode" type="checkbox" />
+          <span>Training Mode</span>
+        </label>
+        <span class="toggle-hint">Legal-move highlights, hints, and rules reference</span>
+      </div>
+
+      <!-- Tutorial list (shown when training mode is on and tutorials exist) -->
+      <div v-if="trainingMode" class="tutorial-list">
+        <div v-if="tutorialsLoading" class="tutorial-loading">Loading tutorials…</div>
+        <template v-else-if="tutorials.length">
+          <p class="tutorial-intro">Choose a scripted tutorial or play free training:</p>
+          <div class="tutorial-items">
+            <button
+              v-for="t in tutorials"
+              :key="t.id"
+              class="tutorial-item"
+              :disabled="!connected"
+              @click="handleTutorial(t.id)"
+            >
+              <span class="tutorial-title">{{ t.title }}</span>
+              <span class="tutorial-desc">{{ t.description }}</span>
+            </button>
+            <button class="tutorial-item tutorial-free" :disabled="!connected" @click="handleTraining">
+              <span class="tutorial-title">Free Training</span>
+              <span class="tutorial-desc">Play a normal hand with legal-move highlights and hints.</span>
+            </button>
+          </div>
+        </template>
+        <div v-else>
+          <button class="btn-solo" :disabled="!connected" @click="handleTraining">Start Training →</button>
+        </div>
+      </div>
     </section>
 
     <!-- Multiplayer actions -->
@@ -134,13 +203,42 @@ h1 { font-size: 2.5rem; margin-bottom: 1.5rem; }
 .name-section label { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; color: #9ca3af; }
 .name-section input { font-size: 1rem; }
 .name-error { color: #f87171; font-size: 0.85rem; margin: 0.25rem 0 0; }
-.solo { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+.solo { display: flex; flex-direction: column; gap: 0.75rem;
   background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4);
   border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+.solo-top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .solo-text h2 { margin: 0 0 0.25rem; font-size: 1.1rem; }
 .solo-text p { margin: 0; font-size: 0.85rem; color: #9ca3af; }
+.solo-actions { display: flex; flex-direction: column; gap: 0.5rem; }
 .btn-solo { background: #6366f1; white-space: nowrap; }
 .btn-solo:hover:not(:disabled) { background: #4f46e5; }
+.training-toggle-row { display: flex; align-items: center; gap: 0.75rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.08); }
+.toggle-label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.9rem; white-space: nowrap; }
+.toggle-label input[type="checkbox"] { width: 1rem; height: 1rem; cursor: pointer; }
+.toggle-hint { font-size: 0.75rem; color: #9ca3af; }
+.tutorial-list { padding-top: 0.5rem; }
+.tutorial-intro { margin: 0 0 0.5rem; font-size: 0.82rem; color: #9ca3af; }
+.tutorial-items { display: flex; flex-direction: column; gap: 0.4rem; }
+.tutorial-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  color: #d1d5db;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tutorial-item:hover:not(:disabled) { border-color: #6366f1; background: rgba(99,102,241,0.1); }
+.tutorial-item:disabled { opacity: 0.5; cursor: not-allowed; }
+.tutorial-title { font-size: 0.9rem; font-weight: 600; color: #fff; }
+.tutorial-desc { font-size: 0.78rem; color: #9ca3af; }
+.tutorial-free { border-style: dashed; }
+.tutorial-loading { font-size: 0.82rem; color: #9ca3af; }
 .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2rem; }
 .join-code-section { grid-column: 1 / -1; }
 .join-actions { display: flex; gap: 0.5rem; }
@@ -194,10 +292,10 @@ input { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0
     grid-column: auto;
   }
 
-  .solo {
+  .solo-top {
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.75rem;
+    gap: 0.5rem;
   }
 
   .game-options {

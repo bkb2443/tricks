@@ -6,6 +6,24 @@ use crate::engine::game::Game;
 use crate::engine::meta::{GameMeta, LobbyMeta};
 use crate::engine::{Card, Trick};
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ChatMessage {
+    pub from: String,
+    pub text: String,
+    #[ts(type = "number")]
+    pub timestamp: u64,
+}
+
+/// A hint card suggested to the player in training mode, paired with a human-readable reason.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HintCard {
+    pub card: Card,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -55,6 +73,21 @@ pub struct GameState {
     /// Display name for each seat. Populated by the room before the first Snapshot.
     #[serde(default)]
     pub names: Vec<String>,
+    /// True when this room is in training mode (solo rooms only).
+    #[serde(default)]
+    pub training_mode: bool,
+    /// True when the player has enabled best-card hint suggestions.
+    #[serde(default)]
+    pub hint_enabled: bool,
+    /// Legal cards for the current player's seat (populated only in training mode,
+    /// only for the snapshot sent to that player).
+    #[serde(default)]
+    pub legal_cards: Vec<Card>,
+    /// Best-card hint (populated in training mode when hint_enabled is true and
+    /// it is the player's turn). Not populated by `redacted_for`; the room populates
+    /// it before sending a private snapshot.
+    #[serde(default)]
+    pub hint: Option<HintCard>,
 }
 
 impl GameState {
@@ -85,16 +118,24 @@ impl GameState {
             session_scores: vec![0; player_count],
             meta: GameMeta::None,
             names: Vec::new(),
+            training_mode: false,
+            hint_enabled: false,
+            legal_cards: Vec::new(),
+            hint: None,
         }
     }
 
     /// Build a snapshot of this state as viewed by `seat`:
     ///   * every hand other than `seat`'s is cleared
     ///   * any extra pile not in `game.visible_extra_piles(self, seat)` is removed
+    ///   * in training mode, `legal_cards` is populated for the requested seat
     ///
     /// Single source of truth for snapshot redaction. The room sends the result to
     /// one player as a `Snapshot` message; nothing else should re-implement either
     /// the hand-clearing or the pile-filtering inline.
+    ///
+    /// Note: `hint` is NOT populated here. The room populates it before sending the
+    /// private snapshot (so it can call `bot::play_card` without a borrow conflict).
     pub fn redacted_for(&self, seat: usize, game: &dyn Game) -> GameState {
         let mut view = self.clone();
         for (i, hand) in view.hands.iter_mut().enumerate() {
@@ -105,16 +146,37 @@ impl GameState {
         let visible = game.visible_extra_piles(self, seat);
         view.extra_piles
             .retain(|(name, _)| visible.contains(&name.as_str()));
+
+        // In training mode, populate legal_cards for this seat.
+        view.legal_cards = if self.training_mode && self.phase == GamePhase::Playing {
+            match &self.current_trick {
+                None => self.hands[seat].clone(),
+                Some(trick) if trick.plays.is_empty() => self.hands[seat].clone(),
+                Some(trick) => {
+                    let hand = self.hands[seat].clone();
+                    let trick_clone = trick.clone();
+                    game.legal_plays(&hand, &trick_clone, self)
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        // hint is always cleared here; the room sets it after calling bot::play_card.
+        view.hint = None;
+
         view
     }
 
-    /// Build a snapshot for a spectator: all hands and extra piles cleared.
+    /// Build a snapshot for a spectator: all hands, extra piles, legal_cards, and hint cleared.
     pub fn redacted_for_spectator(&self) -> GameState {
         let mut view = self.clone();
         for hand in view.hands.iter_mut() {
             hand.clear();
         }
         view.extra_piles.clear();
+        view.legal_cards.clear();
+        view.hint = None;
         view
     }
 
@@ -147,6 +209,10 @@ impl GameState {
                 max_hands,
             }),
             names: Vec::new(),
+            training_mode: false,
+            hint_enabled: false,
+            legal_cards: Vec::new(),
+            hint: None,
         }
     }
 }
@@ -161,12 +227,18 @@ impl GameState {
 pub enum ClientMessage {
     /// Join an existing room by ID, or create a new one (omit room_id).
     /// Set `fill_bots: true` to have the server fill remaining seats with bots (useful for local dev).
+    /// Set `training_mode: true` to enable training mode for this session (solo only).
+    /// Optionally set `training_tutorial_id` to load a specific scripted tutorial hand.
     JoinRoom {
         room_id: Option<Uuid>,
         game: String,
         players: usize,
         #[serde(default)]
         fill_bots: bool,
+        #[serde(default)]
+        training_mode: bool,
+        #[serde(default)]
+        training_tutorial_id: Option<String>,
     },
     /// Multiplayer: create a new private room and join it as host.
     CreateRoom {
@@ -198,6 +270,8 @@ pub enum ClientMessage {
     LeaveQueue,
     /// Next dealer advances from Intermission to start the next hand.
     StartNextHand,
+    /// Toggle the best-card hint on/off (training mode only). No fields — server flips hint_enabled.
+    ToggleHint,
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +362,10 @@ pub enum StateUpdate {
     },
     Error {
         message: String,
+    },
+    /// Sent privately to the human player during a tutorial to display narration text.
+    TutorialNarration {
+        text: String,
     },
 }
 
@@ -429,6 +507,126 @@ mod tests {
         assert_eq!(state.hands[1].len(), 1, "source hands unchanged");
         assert_eq!(state.hands[2].len(), 3, "source hands unchanged");
         assert_eq!(state.extra_piles.len(), 2, "source extra_piles unchanged");
+    }
+
+    // ── training mode: legal_cards population ────────────────────────────────
+
+    /// Build a Playing-phase state with `training_mode = true` and all five
+    /// seats holding one card each. `current_player` is set to `seat`.
+    fn playing_training_state(seat: usize) -> GameState {
+        let mut s = GameState::new(Uuid::nil(), "mock".into(), 5, 0);
+        s.phase = GamePhase::Playing;
+        s.training_mode = true;
+        s.current_player = seat;
+        let c = Card::new(Suit::Clubs, Rank::Ace);
+        s.hands = vec![vec![c]; 5];
+        s
+    }
+
+    #[test]
+    fn redacted_for_populates_legal_cards_in_training_mode_playing_phase() {
+        // In training mode + Playing phase, legal_cards is populated for the requested
+        // seat regardless of whether it is their turn. When there is no active trick,
+        // the full hand is returned as legal.
+        let state = playing_training_state(1);
+        let game = MockGame { visible: vec![] };
+
+        // Current player (seat 1): full hand returned as legal cards.
+        let view1 = state.redacted_for(1, &game);
+        assert_eq!(
+            view1.legal_cards.len(),
+            1,
+            "current player's full hand should be legal cards"
+        );
+
+        // Non-current player (seat 0): also gets legal_cards (their full hand),
+        // because the redaction populates it for any seat in training + Playing.
+        let view0 = state.redacted_for(0, &game);
+        assert_eq!(
+            view0.legal_cards.len(),
+            1,
+            "training mode populates legal_cards for any seat in Playing phase"
+        );
+    }
+
+    #[test]
+    fn redacted_for_populates_legal_cards_mid_trick() {
+        // Use the real Sheepshead game so legal_plays enforces suit-following.
+        use crate::engine::Rank;
+        use crate::games::sheepshead::Sheepshead;
+
+        let mut state = GameState::new(Uuid::nil(), "sheepshead".into(), 5, 0);
+        state.phase = GamePhase::Playing;
+        state.training_mode = true;
+        state.current_player = 1;
+
+        // Give seat 1 one plain-clubs card and one non-clubs card.
+        let clubs_card = Card::new(Suit::Clubs, Rank::Ace);
+        let spades_card = Card::new(Suit::Spades, Rank::King);
+        state.hands[1] = vec![clubs_card, spades_card];
+
+        // Build a trick that was led with a clubs card (plain suit, not trump).
+        // In Sheepshead, A♣ is a plain-suit clubs card (clubs Ace is not trump).
+        // Seat 0 led a plain clubs card.
+        let mut trick = Trick::new(0);
+        trick.plays.push((0, Card::new(Suit::Clubs, Rank::Nine)));
+        state.current_trick = Some(trick);
+
+        // Set a default meta so sheepshead meta is accessible
+        state.meta = GameMeta::Sheepshead(SheepsheadMeta {
+            picker: None,
+            sub_phase: "done".into(),
+            passed: 0,
+            leaster: false,
+            buried: vec![],
+            callable_suits: vec![],
+            called_suit: None,
+            going_alone: false,
+            partner: None,
+        });
+
+        let view = state.redacted_for(1, &Sheepshead);
+        // Seat 1 must follow clubs; only clubs_card is legal.
+        assert_eq!(view.legal_cards.len(), 1);
+        assert_eq!(view.legal_cards[0], clubs_card);
+    }
+
+    #[test]
+    fn redacted_for_clears_legal_cards_outside_playing_phase() {
+        let mut state = GameState::new(Uuid::nil(), "mock".into(), 3, 0);
+        state.phase = GamePhase::Bidding;
+        state.training_mode = true;
+        let c = Card::new(Suit::Clubs, Rank::Ace);
+        state.hands = vec![vec![c]; 3];
+        let game = MockGame { visible: vec![] };
+
+        let view = state.redacted_for(0, &game);
+        assert!(
+            view.legal_cards.is_empty(),
+            "legal_cards must be empty when not in Playing phase"
+        );
+    }
+
+    #[test]
+    fn redacted_for_spectator_clears_training_fields() {
+        let mut state = playing_training_state(0);
+        state.hint_enabled = true;
+        state.hint = Some(HintCard {
+            card: Card::new(Suit::Clubs, Rank::Ace),
+            reason: "test reason".into(),
+        });
+        state.legal_cards = vec![Card::new(Suit::Clubs, Rank::Ace)];
+
+        let view = state.redacted_for_spectator();
+        assert!(
+            view.legal_cards.is_empty(),
+            "spectator view clears legal_cards"
+        );
+        assert!(view.hint.is_none(), "spectator view clears hint");
+        // All hands are cleared too
+        for hand in &view.hands {
+            assert!(hand.is_empty());
+        }
     }
 
     #[test]

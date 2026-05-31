@@ -36,12 +36,36 @@ The client reconstructs UI from server-pushed snapshots. It never re-derives gam
 - Ephemeral UI timers (completed-trick hold, toast reveals) belong in component-local composables, not the global store
 - Composables split by domain: `useGameActions` for generic actions, `useLobbyActions` for room creation/join, game-specific actions under `games/<name>/`
 
+## Test Requirements
+
+Tests are part of the deliverable — not optional. Write them alongside implementation.
+
+**Every new composable function, store state mutation, and user-facing feature must have tests.**
+
+**Unit tests (Vitest — `*.test.ts` alongside the source file):**
+- New `useGame`/composable functions: test they send the correct WebSocket message
+- New store mutations: assert the correct state change for each new `StateUpdate` variant
+- Do not test component rendering — test behavior and state
+
+**E2e tests (Playwright — `client/e2e/*.spec.ts`):**
+- Every new user-facing feature needs at least one Playwright spec
+- Use `page.routeWebSocket('**/ws', ws => { ... })` to mock the server — no real server needed
+- Drive the UI with scripted server responses; assert UI state with `expect(locator).toBeVisible()`
+- Reference `client/e2e/sheepshead-deal-flow.spec.ts` for the full pattern
+
+```bash
+# Run e2e tests
+export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+cd client && npx playwright test --reporter=line
+```
+
 ## Commands
 
 ```bash
 export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
 cd client
 npm run test:unit
+npx playwright test --reporter=line
 npx vue-tsc --noEmit
 npm run lint
 npm run dev       # dev server (proxies /ws → localhost:3000)
@@ -52,5 +76,6 @@ npm run dev       # dev server (proxies /ws → localhost:3000)
 When dispatched, report back:
 1. Files changed (exact paths)
 2. Summary of what changed and why
-3. Test results: `npm run test:unit` and `npx vue-tsc --noEmit` output
-4. Warnings: any protocol type changes in `client/src/engine/types.ts` that require corresponding Rust-side updates
+3. Test results: `npm run test:unit`, `npx playwright test`, and `npx vue-tsc --noEmit` output
+4. Test coverage: list every new user-facing feature and confirm it has an e2e spec
+5. Warnings: any protocol type changes in `client/src/engine/types.ts` that require corresponding Rust-side updates

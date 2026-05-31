@@ -19,6 +19,10 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     session_scores: [0, 0, 0, 0, 0],
     meta: { kind: 'sheepshead', picker: null, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null },
     names: [],
+    training_mode: false,
+    hint_enabled: false,
+    legal_cards: [],
+    hint: null,
     ...overrides,
   }
 }
@@ -336,5 +340,42 @@ describe('game store', () => {
     expect(store.seat).toBeNull()
     expect(store.gameState).toBeNull()
     expect(store.isSolo).toBe(false)
+  })
+
+  // ── tutorial_narration handling ─────────────────────────────────────────────
+
+  describe('tutorial_narration handling', () => {
+    it('sets trainingNarration when tutorial_narration message arrives', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Lead trump to draw defenders.' })
+      expect(store.trainingNarration).toBe('Lead trump to draw defenders.')
+    })
+
+    it('appends to tutorialNarrationHistory on each narration', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'First.' })
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Second.' })
+      expect(store.tutorialNarrationHistory).toEqual(['First.', 'Second.'])
+    })
+
+    it('isTraining is false when training_mode is false', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'snapshot', state: makeState({ training_mode: false }) })
+      expect(store.isTraining).toBe(false)
+    })
+
+    it('isTraining is true when training_mode is true', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'snapshot', state: makeState({ training_mode: true }) })
+      expect(store.isTraining).toBe(true)
+    })
+
+    it('reset clears trainingNarration and history', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Something.' })
+      store.reset()
+      expect(store.trainingNarration).toBeNull()
+      expect(store.tutorialNarrationHistory).toEqual([])
+    })
   })
 })

@@ -297,6 +297,72 @@ impl Game for Euchre {
         }
     }
 
+    fn tutorials(&self) -> &'static [crate::engine::tutorial::TutorialHand] {
+        crate::games::euchre::tutorials::all()
+    }
+
+    fn hint_reason(
+        &self,
+        card: crate::engine::Card,
+        state: &crate::engine::GameState,
+        seat: usize,
+    ) -> &'static str {
+        use crate::engine::GameMeta;
+
+        let is_trump = self.trump_rank(card, state).is_some();
+        let is_leading = state
+            .current_trick
+            .as_ref()
+            .is_none_or(|t| t.plays.is_empty());
+
+        let is_maker = if let GameMeta::Euchre(ref m) = state.meta {
+            m.caller_seat == Some(seat)
+                || (!m.going_alone && m.caller_seat.map(|cs| (cs + 2) % 4) == Some(seat))
+        } else {
+            false
+        };
+
+        if is_leading {
+            if is_maker {
+                if is_trump {
+                    "Lead trump \u{2014} drive out opponents\u{2019} trump while you still have strong ones"
+                } else if card.rank == crate::engine::Rank::Ace {
+                    "Lead your plain-suit ace \u{2014} a good chance to steal a trick without using trump"
+                } else {
+                    "Lead your lowest card \u{2014} no great options, probe what the opponents hold"
+                }
+            } else if card.rank == crate::engine::Rank::Ace && !is_trump {
+                "Lead your ace \u{2014} steal a trick before the maker leads trump to clear the field"
+            } else {
+                "Lead low \u{2014} see what the maker plays before committing your trump"
+            }
+        } else {
+            let trick = match &state.current_trick {
+                Some(t) => t,
+                None => return "",
+            };
+            let winner_seat = crate::bot::current_winner(trick, self, state);
+            let teammate: Option<usize> = if let GameMeta::Euchre(ref m) = state.meta {
+                if m.going_alone && m.caller_seat == Some(seat) {
+                    None
+                } else {
+                    Some((seat + 2) % 4)
+                }
+            } else {
+                Some((seat + 2) % 4)
+            };
+            let team_winning = winner_seat == seat || teammate == Some(winner_seat);
+
+            if team_winning {
+                "Your team is winning this trick \u{2014} play your lowest card"
+            } else if is_trump {
+                "Play the minimum trump needed to win \u{2014} save stronger trump for later tricks"
+            } else {
+                "You can\u{2019}t win this trick \u{2014} save your trump for a better opportunity"
+            }
+        }
+    }
+
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
         let n = tricks_by_player.len();
         let mut scores = vec![0i32; n];

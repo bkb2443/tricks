@@ -11,6 +11,8 @@ export default defineConfig({
     proxy: {
       // Forward /ws to the Rust backend during development
       '/ws': { target: 'ws://localhost:3000', ws: true, changeOrigin: true },
+      // Forward /api to the Rust backend during development
+      '/api': { target: 'http://localhost:3000', changeOrigin: true },
     },
   },
   test: {

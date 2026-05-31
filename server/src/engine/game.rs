@@ -272,6 +272,19 @@ pub trait Game: Send + Sync {
         let _ = cumulative_scores;
         None
     }
+
+    /// Returns scripted tutorial hands for this game. Default: none.
+    fn tutorials(&self) -> &'static [crate::engine::tutorial::TutorialHand] {
+        &[]
+    }
+
+    /// Given the card the bot chose to play (or the hint card), return a short human-readable
+    /// reason string for why this card is good. Used in training mode hint display.
+    /// Default: empty string (hint text suppressed).
+    fn hint_reason(&self, card: Card, state: &GameState, seat: usize) -> &'static str {
+        let _ = (card, state, seat);
+        ""
+    }
 }
 
 /// The logical suit category of a card (distinguishes trump from plain suits).

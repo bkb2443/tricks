@@ -11,17 +11,31 @@ export function useGame() {
 
   function createRoom(game: string, players: number): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: false })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: false, training_mode: false, training_tutorial_id: null })
   }
 
   function createSoloRoom(game: string, players: number): void {
     store.isSolo = true
-    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true })
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true, training_mode: false, training_tutorial_id: null })
   }
 
   function joinRoom(roomId: string, game = 'sheepshead', players = 5): void {
     store.isSolo = false
-    sendMessage({ type: 'join_room', room_id: roomId, game, players, fill_bots: false })
+    sendMessage({ type: 'join_room', room_id: roomId, game, players, fill_bots: false, training_mode: false, training_tutorial_id: null })
+  }
+
+  function createSoloTrainingRoom(game: string, players: number): void {
+    store.isSolo = true
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true, training_mode: true, training_tutorial_id: null })
+  }
+
+  function createSoloTutorialRoom(game: string, players: number, tutorialId: string): void {
+    store.isSolo = true
+    sendMessage({ type: 'join_room', room_id: null, game, players, fill_bots: true, training_mode: true, training_tutorial_id: tutorialId })
+  }
+
+  function toggleHint(): void {
+    sendMessage({ type: 'toggle_hint' })
   }
 
   function playCard(card: Card): void {
@@ -95,7 +109,8 @@ export function useGame() {
 
   return {
     store, connected,
-    createRoom, createSoloRoom, joinRoom, playCard, pick, pass, bury, callAce, goAlone,
+    createRoom, createSoloRoom, createSoloTrainingRoom, createSoloTutorialRoom, toggleHint,
+    joinRoom, playCard, pick, pass, bury, callAce, goAlone,
     joinWithCode, spectateRoom, createPrivateRoom, joinQueue, leaveQueue, startGame, sendLobbyChat, forceBot, extendRejoin,
     startNextHand,
   }

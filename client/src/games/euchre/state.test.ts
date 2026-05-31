@@ -31,6 +31,10 @@ function makeEuchreState(meta: Record<string, unknown> = {}): GameState {
       ...meta,
     },
     names: [],
+    training_mode: false,
+    hint_enabled: false,
+    legal_cards: [],
+    hint: null,
   }
 }
 

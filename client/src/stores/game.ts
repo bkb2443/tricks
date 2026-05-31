@@ -22,6 +22,8 @@ export const useGameStore = defineStore('game', () => {
   const roomCode       = ref<string | null>(null)
   const isSpectator    = ref<boolean>(false)
   const spectatorCount = ref<number>(0)
+  const trainingNarration = ref<string | null>(null)
+  const tutorialNarrationHistory = ref<string[]>([])
   let pauseTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -46,6 +48,8 @@ export const useGameStore = defineStore('game', () => {
   const gameStarted = computed(() => gameState.value !== null)
 
   const isLobby = computed(() => gameState.value?.phase === 'lobby')
+
+  const isTraining = computed(() => gameState.value?.training_mode === true)
 
 
   /** Returns "You" for the local player's seat, the server-assigned name otherwise,
@@ -199,6 +203,11 @@ export const useGameStore = defineStore('game', () => {
       case 'error':
         error.value = update.message
         break
+
+      case 'tutorial_narration':
+        trainingNarration.value = update.text
+        tutorialNarrationHistory.value = [...tutorialNarrationHistory.value, update.text]
+        break
     }
   }
 
@@ -225,6 +234,8 @@ export const useGameStore = defineStore('game', () => {
     showCatchUp.value    = false
     isSpectator.value    = false
     spectatorCount.value = 0
+    trainingNarration.value = null
+    tutorialNarrationHistory.value = []
     if (pauseTimer !== null) { clearTimeout(pauseTimer); pauseTimer = null }
   }
 
@@ -232,9 +243,9 @@ export const useGameStore = defineStore('game', () => {
     // state
     roomId, seat, gameState, myHand, error, isSolo, sessionScores, sessionWinner, completedTrick,
     partnerRevealedSeat, seats, lobbyChat, queueStatus, roomCode, showCatchUp,
-    isSpectator, spectatorCount,
+    isSpectator, spectatorCount, trainingNarration, tutorialNarrationHistory,
     // derived
-    phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName, isLobby,
+    phase, isMyTurn, picker, isPicker, gameStarted, currentTrickWinner, playerName, isLobby, isTraining,
     // actions
     handleUpdate, reset, dismissCatchUp,
   }
