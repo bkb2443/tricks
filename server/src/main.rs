@@ -25,6 +25,10 @@ async fn main() {
     let app = Router::new()
         .route("/ws", get(ws::handler::upgrade))
         .route("/health", get(|| async { "ok" }))
+        .route(
+            "/api/training/tutorials/:game",
+            get(training_tutorials_handler),
+        )
         .layer(CorsLayer::permissive())
         .with_state(lobby);
 
@@ -37,4 +41,24 @@ async fn main() {
         .unwrap();
     tracing::info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn training_tutorials_handler(
+    axum::extract::Path(game_name): axum::extract::Path<String>,
+) -> axum::response::Json<serde_json::Value> {
+    let tutorials = games::get_game(&game_name)
+        .map(|g| {
+            g.tutorials()
+                .iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "title": t.title,
+                        "description": t.description
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    axum::response::Json(serde_json::json!(tutorials))
 }

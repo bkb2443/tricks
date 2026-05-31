@@ -7,6 +7,9 @@ const props = defineProps<{
   selectable?: boolean
   selected?: boolean
   faceDown?: boolean
+  legal?: boolean
+  illegal?: boolean
+  hint?: boolean
 }>()
 
 const emit = defineEmits<{ select: [card: Card] }>()
@@ -94,6 +97,9 @@ const dragStyle = computed(() => {
       black: !isRed && !faceDown,
       'face-down': faceDown,
       'drag-cancel': isCancelling,
+      'card-legal': legal,
+      'card-illegal': illegal,
+      'card-hint': hint,
     }"
     :style="dragStyle"
     :aria-label="faceDown ? 'face-down card' : `${rank} of ${card.suit}`"
@@ -163,6 +169,19 @@ const dragStyle = computed(() => {
   75% { transform: translateX(4px); }
 }
 .drag-cancel { animation: drag-cancel 0.25s ease; }
+
+.card-legal {
+  box-shadow: 0 0 0 2px var(--color-success, #22c55e);
+  border-color: #22c55e;
+}
+.card-illegal {
+  opacity: 0.4;
+  filter: grayscale(0.5);
+}
+.card-hint {
+  box-shadow: 0 0 0 3px #f59e0b, 0 0 12px rgba(245,158,11,0.5);
+  border-color: #f59e0b;
+}
 
 @media (max-width: 640px) {
   .corner { font-size: 0.55rem; }

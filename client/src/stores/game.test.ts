@@ -19,6 +19,10 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     session_scores: [0, 0, 0, 0, 0],
     meta: { kind: 'sheepshead', picker: null, passed: 0, buried: [], leaster: false, sub_phase: 'picking', callable_suits: [], called_suit: null, going_alone: false, partner: null },
     names: [],
+    training_mode: false,
+    hint_enabled: false,
+    legal_cards: [],
+    hint: null,
     ...overrides,
   }
 }

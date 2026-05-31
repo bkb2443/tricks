@@ -5,6 +5,7 @@ import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
 import HandReplay from '@/components/HandReplay.vue'
+import TrainingOverlay from '@/components/TrainingOverlay.vue'
 import EuchreBiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
@@ -174,9 +175,15 @@ watch(
         :cards="store.myHand"
         :selectable="canPlay"
         :sort-fn="euchreHandSortFn"
+        :show-training="store.isTraining"
+        :legal-cards="store.gameState?.legal_cards"
+        :hint-card="store.gameState?.hint?.card ?? null"
         @select="handlePlay"
       />
     </section>
+
+    <!-- ── Training overlay (narration, hints, rules) ───────── -->
+    <training-overlay />
 
     <!-- ── "Sits out" notice ───────────────────────────────────── -->
     <section v-if="seat === sitsOut" class="sits-out-notice">

@@ -5,6 +5,7 @@ import { useGame } from '@/composables/useGame'
 import TrickDisplay from '@/components/TrickDisplay.vue'
 import HandComponent from '@/components/HandComponent.vue'
 import HandReplay from '@/components/HandReplay.vue'
+import TrainingOverlay from '@/components/TrainingOverlay.vue'
 import BiddingPanel from './BiddingPanel.vue'
 import type { Card } from '@/engine/types'
 import { phaseLabel } from '@/engine/phases'
@@ -167,9 +168,15 @@ watch(
       <hand-component
         :cards="store.myHand"
         :selectable="canPlay"
+        :show-training="store.isTraining"
+        :legal-cards="store.gameState?.legal_cards"
+        :hint-card="store.gameState?.hint?.card ?? null"
         @select="handlePlay"
       />
     </section>
+
+    <!-- ── Training overlay (narration, hints, rules) ───────── -->
+    <training-overlay />
 
     <!-- ── Session scoreboard (visible once scores accumulate) ── -->
     <section v-if="store.sessionScores.length" class="session-scores">

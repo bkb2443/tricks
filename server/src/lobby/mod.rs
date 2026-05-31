@@ -42,6 +42,19 @@ impl Lobby {
         player_count: usize,
         victory_goal: i32,
     ) -> Option<(String, Arc<Room>)> {
+        self.create_room_with_training(game_name, player_count, victory_goal, false, None)
+    }
+
+    /// Create a new room with optional training mode settings.
+    /// Returns `(room_code, Arc<Room>)` or `None` if game_name is unknown.
+    pub fn create_room_with_training(
+        &self,
+        game_name: String,
+        player_count: usize,
+        victory_goal: i32,
+        training_mode: bool,
+        tutorial_id: Option<String>,
+    ) -> Option<(String, Arc<Room>)> {
         let game = games::get_game(&game_name)?;
         // Generate a unique code (retry on collision, up to 10 times)
         let code = (0..10)
@@ -56,6 +69,8 @@ impl Lobby {
             victory_goal,
             code.clone(),
             "private".into(),
+            training_mode,
+            tutorial_id,
         ));
         self.rooms.insert(code.clone(), Arc::clone(&room));
         Some((code, room))

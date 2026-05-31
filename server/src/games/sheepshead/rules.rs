@@ -279,6 +279,61 @@ impl Game for Sheepshead {
             .map(|(i, _)| i)
     }
 
+    fn tutorials(&self) -> &'static [crate::engine::tutorial::TutorialHand] {
+        crate::games::sheepshead::tutorials::all()
+    }
+
+    fn hint_reason(&self, card: crate::engine::Card, state: &crate::engine::GameState, seat: usize) -> &'static str {
+        use crate::engine::GameMeta;
+
+        let is_trump = self.trump_rank(card, state).is_some();
+        let is_leading = state.current_trick.as_ref().is_none_or(|t| t.plays.is_empty());
+        let picker = if let GameMeta::Sheepshead(ref m) = state.meta { m.picker } else { None };
+        let is_picker = picker == Some(seat);
+
+        if is_leading {
+            if is_picker {
+                if is_trump {
+                    "Lead trump \u{2014} draw defenders\u{2019} trump out early while yours is strongest"
+                } else if card.rank == crate::engine::Rank::Ace {
+                    "Lead your ace \u{2014} if the picker isn\u{2019}t void here, you\u{2019}ll take this trick"
+                } else {
+                    "No trump left \u{2014} lead your highest fail card to create pressure"
+                }
+            } else if card.rank == crate::engine::Rank::Ace && !is_trump {
+                "Lead your ace \u{2014} the picker isn\u{2019}t void here, so you should win this trick"
+            } else {
+                "Lead a low card to preserve your trump; avoid suits the picker can trump"
+            }
+        } else {
+            // Following
+            let trick = match &state.current_trick {
+                Some(t) => t,
+                None => return "",
+            };
+            let winner_seat = crate::bot::current_winner(trick, self, state);
+            let partner = if let GameMeta::Sheepshead(ref m) = state.meta { m.partner } else { None };
+            let teammate = if is_picker { partner } else { picker };
+            let team_winning = winner_seat == seat || teammate == Some(winner_seat);
+            let i_am_winning = winner_seat == seat;
+
+            if team_winning && !i_am_winning {
+                "Your teammate is winning \u{2014} discard a high-point card for them to collect"
+            } else if i_am_winning {
+                "You\u{2019}re already winning this trick \u{2014} play your cheapest card"
+            } else if is_trump {
+                "This trick is worth a lot of points \u{2014} use just enough trump to take it"
+            } else {
+                let trick_pts: u8 = trick.plays.iter().map(|(_, c)| self.card_points(*c)).sum();
+                if trick_pts < 5 {
+                    "This trick has few points \u{2014} don\u{2019}t waste good cards on it"
+                } else {
+                    "You can\u{2019}t win this trick \u{2014} save your strong cards for later"
+                }
+            }
+        }
+    }
+
     fn score_game(&self, tricks_by_player: &[Vec<Trick>], state: &GameState) -> Vec<i32> {
         let n = tricks_by_player.len();
 

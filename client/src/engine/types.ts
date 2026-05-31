@@ -2,7 +2,6 @@
 // Run `cargo test export_typescript_bindings` in server/ to regenerate.
 
 type JsonValue = number | string | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-export interface ChatMessage { from: string; text: string; timestamp: number }
 
 export type Suit = "clubs" | "spades" | "hearts" | "diamonds";
 export type Rank = "two" | "three" | "four" | "five" | "six" | "seven" | "eight" | "nine" | "ten" | "jack" | "queen" | "king" | "ace";
@@ -26,6 +25,7 @@ export type SeatInfo = { seat: number,
  * "empty" | "human" | "bot" | "disconnected"
  */
 state: string, name: string | null, };
+export type ChatMessage = { from: string, text: string, timestamp: number, };
 export type LobbyMeta = { host_seat: number | null, countdown_ends_at: number | null, room_type: string, max_hands: number | null, };
 export type SheepsheadMeta = { picker: number | null, 
 /**
@@ -38,6 +38,7 @@ export type EuchreMeta = { turned_up_card: Card | null,
  */
 sub_phase: string, passed_round1: number, passed_round2: number, caller_seat: number | null, called_suit: string | null, going_alone: boolean, sits_out: number | null, };
 export type GameMeta = { "kind": "none" } | { "kind": "lobby" } & LobbyMeta | { "kind": "sheepshead" } & SheepsheadMeta | { "kind": "euchre" } & EuchreMeta;
+export type HintCard = { card: Card, reason: string, };
 export type GameState = { game_id: string, game_name: string, phase: GamePhase, player_count: number, 
 /**
  * Seat index of the player who dealt this hand.
@@ -68,7 +69,26 @@ meta: GameMeta,
 /**
  * Display name for each seat. Populated by the room before the first Snapshot.
  */
-names: Array<string>, };
+names: Array<string>, 
+/**
+ * True when this room is in training mode (solo rooms only).
+ */
+training_mode: boolean, 
+/**
+ * True when the player has enabled best-card hint suggestions.
+ */
+hint_enabled: boolean, 
+/**
+ * Legal cards for the current player's seat (populated only in training mode,
+ * only for the snapshot sent to that player).
+ */
+legal_cards: Array<Card>, 
+/**
+ * Best-card hint (populated in training mode when hint_enabled is true and
+ * it is the player's turn). Not populated by `redacted_for`; the room populates
+ * it before sending a private snapshot.
+ */
+hint: HintCard | null, };
 export type BidPayload = { action: string, cards: Array<Card> | null, suit: string | null, card: Card | null, alone: boolean | null, };
-export type ClientMessage = { "type": "join_room", room_id: string | null, game: string, players: number, fill_bots: boolean, } | { "type": "create_room", name: string, game: string, max_hands: number | null, } | { "type": "join", name: string, room_code: string, } | { "type": "spectate", name: string, room_code: string, } | { "type": "play_card", card: Card, } | { "type": "bid", value: JsonValue, } | { "type": "lobby_chat", text: string, } | { "type": "start_game" } | { "type": "force_bot", seat: number, } | { "type": "extend_rejoin", seat: number, } | { "type": "join_queue" } | { "type": "leave_queue" } | { "type": "start_next_hand" };
-export type StateUpdate = { "type": "joined_room", room_id: string, seat: number, room_code: string, } | { "type": "joined_as_spectator", room_id: string, room_code: string, } | { "type": "snapshot", state: GameState, } | { "type": "card_played", player: number, card: Card, current_trick_winner: number | null, next_player: number, } | { "type": "trick_complete", winner: number, points: number, } | { "type": "hand_complete", hand_scores: Array<number>, session_scores: Array<number>, } | { "type": "session_over", winner: number, final_scores: Array<number>, } | { "type": "bid_placed", player: number, value: JsonValue, current_player: number, } | { "type": "hand_updated", hand: Array<Card>, } | { "type": "phase_changed", phase: GamePhase, } | { "type": "partner_revealed", seat: number, } | { "type": "lobby_chat", from: string, text: string, timestamp: number, } | { "type": "seat_update", seats: Array<SeatInfo>, spectator_count: number, } | { "type": "queue_status", position: number, waiting_since: number, } | { "type": "error", message: string, };
+export type ClientMessage = { "type": "join_room", room_id: string | null, game: string, players: number, fill_bots: boolean, training_mode: boolean, training_tutorial_id: string | null, } | { "type": "create_room", name: string, game: string, max_hands: number | null, } | { "type": "join", name: string, room_code: string, } | { "type": "spectate", name: string, room_code: string, } | { "type": "play_card", card: Card, } | { "type": "bid", value: JsonValue, } | { "type": "lobby_chat", text: string, } | { "type": "start_game" } | { "type": "force_bot", seat: number, } | { "type": "extend_rejoin", seat: number, } | { "type": "join_queue" } | { "type": "leave_queue" } | { "type": "start_next_hand" } | { "type": "toggle_hint" };
+export type StateUpdate = { "type": "joined_room", room_id: string, seat: number, room_code: string, } | { "type": "joined_as_spectator", room_id: string, room_code: string, } | { "type": "snapshot", state: GameState, } | { "type": "card_played", player: number, card: Card, current_trick_winner: number | null, next_player: number, } | { "type": "trick_complete", winner: number, points: number, } | { "type": "hand_complete", hand_scores: Array<number>, session_scores: Array<number>, } | { "type": "session_over", winner: number, final_scores: Array<number>, } | { "type": "bid_placed", player: number, value: JsonValue, current_player: number, } | { "type": "hand_updated", hand: Array<Card>, } | { "type": "phase_changed", phase: GamePhase, } | { "type": "partner_revealed", seat: number, } | { "type": "lobby_chat", from: string, text: string, timestamp: number, } | { "type": "seat_update", seats: Array<SeatInfo>, spectator_count: number, } | { "type": "queue_status", position: number, waiting_since: number, } | { "type": "error", message: string, } | { "type": "tutorial_narration", text: string, };

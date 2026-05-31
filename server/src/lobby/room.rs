@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::engine::game::Game;
 use crate::engine::{
-    Card, GameMeta, GamePhase, GameState, PlayResult, SeatInfo, StateUpdate, deal_game,
+    Card, GameMeta, GamePhase, GameState, HintCard, PlayResult, SeatInfo, StateUpdate, deal_game,
 };
 
 // ── Seat model ───────────────────────────────────────────────────────────────
@@ -114,9 +114,18 @@ pub struct Room {
     max_hands: Mutex<Option<u32>>,
     hands_played: Mutex<u32>,
     spectators: Mutex<Vec<SpectatorEntry>>,
+    /// Whether this room is in training mode (solo rooms only).
+    training_mode: bool,
+    /// Per-session toggle: whether the human player has enabled best-card hints.
+    hint_enabled: Mutex<bool>,
+    /// Scripted tutorial id, if this room is running a tutorial.
+    tutorial_id: Option<String>,
+    /// Index of the next tutorial step to check/fire.
+    tutorial_step_index: Mutex<usize>,
 }
 
 impl Room {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         game_name: String,
@@ -125,6 +134,8 @@ impl Room {
         victory_goal: i32,
         room_code: String,
         room_type: String,
+        training_mode: bool,
+        tutorial_id: Option<String>,
     ) -> Self {
         let (broadcast_tx, _) = broadcast::channel(64);
         let seats = (0..player_count).map(|_| SeatState::Empty).collect();
@@ -151,6 +162,10 @@ impl Room {
             max_hands: Mutex::new(None),
             hands_played: Mutex::new(0),
             spectators: Mutex::new(Vec::new()),
+            training_mode,
+            hint_enabled: Mutex::new(false),
+            tutorial_id,
+            tutorial_step_index: Mutex::new(0),
         }
     }
 
@@ -619,6 +634,7 @@ impl Room {
                 phase: GamePhase::Playing,
             });
         }
+        self.maybe_emit_narration(seat);
         Ok(())
     }
 
@@ -734,6 +750,7 @@ impl Room {
                 });
             }
         }
+        self.maybe_emit_narration(seat);
         Ok(())
     }
 
@@ -899,14 +916,87 @@ impl Room {
         let session_scores_snapshot = self.session_scores.lock().unwrap().clone();
 
         let mut state = GameState::new(self.id, self.game_name.clone(), self.player_count, dealer);
-        deal_game(self.game.as_ref(), &mut state, &mut rng);
+
+        // If a tutorial is active, pre-load fixed hands; otherwise deal normally.
+        let used_tutorial = if let Some(ref tid) = self.tutorial_id {
+            if let Some(tutorial) = self.game.tutorials().iter().find(|t| t.id == tid.as_str()) {
+                // Convert (Suit, Rank) pairs to Card and install fixed hands.
+                for (seat_idx, hand_spec) in tutorial.hands.iter().enumerate() {
+                    if seat_idx < self.player_count {
+                        state.hands[seat_idx] = hand_spec
+                            .iter()
+                            .map(|&(suit, rank)| Card::new(suit, rank))
+                            .collect();
+                    }
+                }
+                // Install extra pile (e.g. blind for Sheepshead).
+                let extra_cards: Vec<Card> = tutorial
+                    .extra_pile
+                    .iter()
+                    .map(|&(suit, rank)| Card::new(suit, rank))
+                    .collect();
+                // Use the same key the game uses ("blind" for Sheepshead, etc.).
+                // We derive it from the existing deal to get the right pile name,
+                // but since we're skipping deal_game we use a generic approach:
+                // call deal_game once on a throwaway state to find the pile name,
+                // then use it. Simpler: just put it under "blind" — the game layer
+                // knows what key to use. Actually, delegate to the game by calling
+                // deal_game on a scratch state and picking the pile name from there.
+                let pile_name = {
+                    let mut scratch = GameState::new(
+                        self.id,
+                        self.game_name.clone(),
+                        self.player_count,
+                        tutorial.dealer,
+                    );
+                    deal_game(self.game.as_ref(), &mut scratch, &mut rng);
+                    scratch
+                        .extra_piles
+                        .into_iter()
+                        .next()
+                        .map(|(name, _)| name)
+                        .unwrap_or_else(|| "extra".to_string())
+                };
+                if !extra_cards.is_empty() {
+                    state.extra_piles = vec![(pile_name, extra_cards)];
+                }
+                state.dealer = tutorial.dealer;
+                state.current_player = (tutorial.dealer + 1) % self.player_count;
+                // Set the initial meta by running deal_game on a scratch state for its meta.
+                {
+                    let mut scratch = GameState::new(
+                        self.id,
+                        self.game_name.clone(),
+                        self.player_count,
+                        tutorial.dealer,
+                    );
+                    deal_game(self.game.as_ref(), &mut scratch, &mut rng);
+                    state.meta = scratch.meta;
+                }
+                // Reset tutorial step index.
+                *self.tutorial_step_index.lock().unwrap() = 0;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !used_tutorial {
+            deal_game(self.game.as_ref(), &mut state, &mut rng);
+        }
+
         state.names = self.compute_names();
         state.session_scores = session_scores_snapshot;
+        state.training_mode = self.training_mode;
+        state.hint_enabled = *self.hint_enabled.lock().unwrap();
+
         {
             let seats = self.seats.lock().unwrap();
             for (seat, seat_state) in seats.iter().enumerate() {
                 let Some(tx) = seat_state.tx() else { continue };
-                let view = state.redacted_for(seat, self.game.as_ref());
+                let view = self.build_snapshot_for_seat(seat, &state);
                 let _ = tx.try_send(StateUpdate::Snapshot { state: view });
             }
         }
@@ -921,6 +1011,134 @@ impl Room {
         }
         *self.state.lock().unwrap() = Some(state);
         tracing::info!(room_code = %self.room_code, dealer, "hand started");
+    }
+
+    /// Build a redacted snapshot for `seat`, populating `hint` if training mode
+    /// and hints are enabled and it is the seat's turn.
+    fn build_snapshot_for_seat(&self, seat: usize, state: &GameState) -> GameState {
+        let mut view = state.redacted_for(seat, self.game.as_ref());
+        // Populate hint when applicable.
+        if state.training_mode
+            && state.hint_enabled
+            && state.current_player == seat
+            && state.phase == GamePhase::Playing
+            && let Some(hint_card) = crate::bot::play_card(state, seat, self.game.as_ref())
+        {
+            let reason = self.game.hint_reason(hint_card, state, seat).to_string();
+            view.hint = Some(HintCard {
+                card: hint_card,
+                reason,
+            });
+        }
+        view
+    }
+
+    /// Send a fresh private snapshot to `seat` (used after hint toggle or other
+    /// per-player state changes that don't need a broadcast).
+    fn send_private_snapshot(&self, seat: usize) {
+        let snapshot = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .as_ref()
+                .map(|s| self.build_snapshot_for_seat(seat, s))
+        };
+        if let Some(view) = snapshot {
+            self.send_private(seat, StateUpdate::Snapshot { state: view });
+        }
+    }
+
+    /// Toggle the hint on/off for `seat` and re-send a private snapshot.
+    pub fn toggle_hint(&self, seat: usize) {
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(ref mut s) = *state {
+                if !s.training_mode {
+                    return;
+                }
+                s.hint_enabled = !s.hint_enabled;
+                // Keep the room-level toggle in sync so the next hand starts correctly.
+                *self.hint_enabled.lock().unwrap() = s.hint_enabled;
+            }
+        }
+        self.send_private_snapshot(seat);
+    }
+
+    /// Check tutorial steps starting from the current step index and fire any
+    /// whose trigger matches the current state. Sends narration privately to the
+    /// human seat. `acting_seat` is the seat that just performed an action.
+    fn maybe_emit_narration(&self, acting_seat: usize) {
+        let tutorial_id = match &self.tutorial_id {
+            Some(id) => id.clone(),
+            None => return,
+        };
+        let tutorial = match self
+            .game
+            .tutorials()
+            .iter()
+            .find(|t| t.id == tutorial_id.as_str())
+        {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Find the human seat (the first Human seat in this solo room).
+        let human_seat = {
+            let seats = self.seats.lock().unwrap();
+            seats.iter().position(|s| s.is_human())
+        };
+        let Some(human_seat) = human_seat else { return };
+
+        let (phase, current_player, completed_tricks_len, sub_phase) = {
+            let guard = self.state.lock().unwrap();
+            let Some(state) = guard.as_ref() else { return };
+            let sub = match &state.meta {
+                GameMeta::Sheepshead(m) => m.sub_phase.clone(),
+                GameMeta::Euchre(m) => m.sub_phase.clone(),
+                _ => String::new(),
+            };
+            (
+                state.phase.clone(),
+                state.current_player,
+                state.completed_tricks.len(),
+                sub,
+            )
+        };
+
+        let mut step_index = self.tutorial_step_index.lock().unwrap();
+        while *step_index < tutorial.steps.len() {
+            let step = &tutorial.steps[*step_index];
+            let fires = match &step.trigger {
+                crate::engine::tutorial::StepTrigger::PlayerTurn { phase: tphase } => {
+                    if *tphase == "playing" {
+                        phase == GamePhase::Playing && current_player == human_seat
+                    } else {
+                        phase == GamePhase::Bidding
+                            && current_player == human_seat
+                            && sub_phase == *tphase
+                    }
+                }
+                crate::engine::tutorial::StepTrigger::BotActed {
+                    seat: bot_seat,
+                    trick_index,
+                } => acting_seat == *bot_seat && completed_tricks_len == trick_index + 1,
+                crate::engine::tutorial::StepTrigger::TrickComplete { trick_index } => {
+                    completed_tricks_len > 0 && completed_tricks_len - 1 == *trick_index
+                }
+                crate::engine::tutorial::StepTrigger::GameEnd => phase == GamePhase::Scoring,
+            };
+
+            if fires {
+                self.send_private(
+                    human_seat,
+                    StateUpdate::TutorialNarration {
+                        text: step.narration.to_string(),
+                    },
+                );
+                *step_index += 1;
+            } else {
+                break;
+            }
+        }
     }
 
     fn compute_names(&self) -> Vec<String> {
@@ -961,6 +1179,8 @@ mod tests {
             24,
             "TEST-42".into(),
             "private".into(),
+            false,
+            None,
         ))
     }
 

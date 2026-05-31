@@ -124,17 +124,40 @@ fn route(
             game,
             players,
             fill_bots,
+            training_mode,
+            training_tutorial_id,
         } => {
             if ctx.is_some() {
                 return Some(StateUpdate::Error {
                     message: "already in a room".into(),
                 });
             }
+            if training_mode && !fill_bots {
+                return Some(StateUpdate::Error {
+                    message: "training mode is only available in solo (bot-only) rooms".into(),
+                });
+            }
             let room = match room_id {
-                Some(ref id) => lobby
-                    .get_room(&id.to_string())
-                    .or_else(|| lobby.create_room(game, players, 24).map(|(_, r)| r))?,
-                None => lobby.create_room(game, players, 24).map(|(_, r)| r)?,
+                Some(ref id) => lobby.get_room(&id.to_string()).or_else(|| {
+                    lobby
+                        .create_room_with_training(
+                            game,
+                            players,
+                            24,
+                            training_mode,
+                            training_tutorial_id,
+                        )
+                        .map(|(_, r)| r)
+                })?,
+                None => lobby
+                    .create_room_with_training(
+                        game,
+                        players,
+                        24,
+                        training_mode,
+                        training_tutorial_id,
+                    )
+                    .map(|(_, r)| r)?,
             };
             match room.join(player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
@@ -415,6 +438,21 @@ fn route(
             if let Some(mm) = lobby.matchmaker.get() {
                 mm.leave_queue(ws_id);
             }
+            None
+        }
+
+        // ── Training ──────────────────────────────────────────────────────────
+        ClientMessage::ToggleHint => {
+            let c = ctx.as_ref()?;
+            let seat = match c.seat {
+                Some(s) => s,
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot toggle hint".into(),
+                    });
+                }
+            };
+            c.room.toggle_hint(seat);
             None
         }
     }

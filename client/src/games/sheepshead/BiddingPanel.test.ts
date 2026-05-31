@@ -27,6 +27,10 @@ function makeState(meta: object, currentPlayer = 1): GameState {
       ...meta,
     },
     names: ['Bot 1', 'You', 'Bot 2', 'Bot 3', 'Bot 4'],
+    training_mode: false,
+    hint_enabled: false,
+    legal_cards: [],
+    hint: null,
   }
 }
 
