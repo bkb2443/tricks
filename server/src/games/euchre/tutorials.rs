@@ -158,3 +158,52 @@ static TUTORIALS: [TutorialHand; 2] = [
 pub fn all() -> &'static [TutorialHand] {
     &TUTORIALS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Card;
+    use std::collections::HashSet;
+
+    fn all_cards_in_tutorial(tutorial: &crate::engine::tutorial::TutorialHand) -> Vec<Card> {
+        let mut cards = Vec::new();
+        for hand in tutorial.hands {
+            for &(suit, rank) in *hand {
+                cards.push(Card::new(suit, rank));
+            }
+        }
+        for &(suit, rank) in tutorial.extra_pile {
+            cards.push(Card::new(suit, rank));
+        }
+        cards
+    }
+
+    fn assert_no_duplicates(tutorial: &crate::engine::tutorial::TutorialHand, name: &str) {
+        let cards = all_cards_in_tutorial(tutorial);
+        let mut seen = HashSet::new();
+        for c in &cards {
+            assert!(seen.insert(*c), "{name}: duplicate card {c}");
+        }
+    }
+
+    #[test]
+    fn calling_trump_has_24_cards_no_duplicates() {
+        let tutorial = &all()[0]; // euchre-calling-trump
+        assert_eq!(all_cards_in_tutorial(tutorial).len(), 24, "Euchre uses a 24-card deck");
+        assert_no_duplicates(tutorial, "calling-trump");
+    }
+
+    #[test]
+    fn going_alone_has_24_cards_no_duplicates() {
+        let tutorial = &all()[1]; // euchre-going-alone
+        assert_eq!(all_cards_in_tutorial(tutorial).len(), 24, "Euchre uses a 24-card deck");
+        assert_no_duplicates(tutorial, "going-alone");
+    }
+
+    #[test]
+    fn all_tutorials_have_nonzero_steps() {
+        for t in all() {
+            assert!(!t.steps.is_empty(), "{} has no steps", t.id);
+        }
+    }
+}

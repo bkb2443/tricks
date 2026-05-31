@@ -132,12 +132,24 @@ Example: issue #12 "Add trick history panel" → branch `issue-12-trick-history-
 
 ---
 
-**Step 4 — Derive plan in context**
+**Step 4 — Derive plan and test map in context**
 
 Read the issue spec. Determine:
 - Which files need to change
 - Which agents own those files (see `.claude/agents/` for boundaries)
 - Whether changes are independent (parallel dispatch) or dependent (sequential)
+
+**Derive a test map**: for each acceptance criterion in the issue, identify the test layer that verifies it:
+
+| Acceptance criterion | Test layer | What to test |
+|---|---|---|
+| Server rejects illegal X | Rust unit test | call handler with illegal input, assert Err |
+| Protocol message shape | Rust unit + TS type check | new variant serializes/deserializes correctly |
+| UI shows Y when server sends Z | Playwright e2e | routeWebSocket → send Z → assert Y visible |
+| Store updates when message arrives | Vitest unit | handleUpdate(msg) → assert store.field |
+| Game rule: card X is legal/illegal | Rust unit test | legal_plays returns/excludes card |
+
+Include this test map in every agent dispatch prompt. Agents must write the tests alongside implementation.
 
 Do NOT write a plan file to disk. Hold the plan in context for this issue only.
 
@@ -157,16 +169,19 @@ Protocol changes (wire types touching both `server/src/engine/state.rs` and `cli
 Pass each agent:
 - The full issue spec (title + body)
 - Exact list of files to touch
+- The test map (from Step 4) — agents must write all tests assigned to their layer
 - Any interface contracts already decided (e.g. wire message shape for protocol changes)
 - Link to relevant specs in `docs/superpowers/specs/` if applicable
+
+**TDD rule:** agents write tests alongside implementation — not after. A function with no test is incomplete.
 
 ---
 
 **Step 6 — Dispatch qa agent**
 
-Prompt: "Run all test suites and report results for the changes made to implement issue #[number]: [title]. Report per the qa agent output contract."
+Prompt: "Run all test suites and report results for the changes made to implement issue #[number]: [title]. Report per the qa agent output contract. Check for coverage gaps (new code with no tests) and write any missing tests before reporting."
 
-**QA passes** if all 4 suites show PASS. **QA fails** if any suite shows FAIL.
+**QA passes** if all 5 suites show PASS (cargo test, cargo clippy, npm test:unit, vue-tsc, playwright e2e) and COVERAGE GAPS reports "none". **QA fails** if any suite shows FAIL or if there are untested new code paths.
 
 ---
 
@@ -174,7 +189,7 @@ Prompt: "Run all test suites and report results for the changes made to implemen
 
 Prompt: "Review the changes made to implement issue #[number]: [title]. Run `git diff main...HEAD` and report findings per the reviewer agent output contract."
 
-**Review passes** if no `critical` or `major` findings. Minor findings do not block. If the reviewer reports only minor findings or none, treat as pass.
+**Review passes** if no `critical` or `major` findings. Minor findings do not block. Missing tests for new behavior are **major** — treat them as blocking.
 
 ---
 

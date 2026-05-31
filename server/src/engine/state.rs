@@ -509,6 +509,123 @@ mod tests {
         assert_eq!(state.extra_piles.len(), 2, "source extra_piles unchanged");
     }
 
+    // ── training mode: legal_cards population ────────────────────────────────
+
+    /// Build a Playing-phase state with `training_mode = true` and all five
+    /// seats holding one card each. `current_player` is set to `seat`.
+    fn playing_training_state(seat: usize) -> GameState {
+        let mut s = GameState::new(Uuid::nil(), "mock".into(), 5, 0);
+        s.phase = GamePhase::Playing;
+        s.training_mode = true;
+        s.current_player = seat;
+        let c = Card::new(Suit::Clubs, Rank::Ace);
+        s.hands = vec![vec![c]; 5];
+        s
+    }
+
+    #[test]
+    fn redacted_for_populates_legal_cards_in_training_mode_playing_phase() {
+        // In training mode + Playing phase, legal_cards is populated for the requested
+        // seat regardless of whether it is their turn. When there is no active trick,
+        // the full hand is returned as legal.
+        let state = playing_training_state(1);
+        let game = MockGame { visible: vec![] };
+
+        // Current player (seat 1): full hand returned as legal cards.
+        let view1 = state.redacted_for(1, &game);
+        assert_eq!(
+            view1.legal_cards.len(),
+            1,
+            "current player's full hand should be legal cards"
+        );
+
+        // Non-current player (seat 0): also gets legal_cards (their full hand),
+        // because the redaction populates it for any seat in training + Playing.
+        let view0 = state.redacted_for(0, &game);
+        assert_eq!(
+            view0.legal_cards.len(),
+            1,
+            "training mode populates legal_cards for any seat in Playing phase"
+        );
+    }
+
+    #[test]
+    fn redacted_for_populates_legal_cards_mid_trick() {
+        // Use the real Sheepshead game so legal_plays enforces suit-following.
+        use crate::games::sheepshead::Sheepshead;
+        use crate::engine::Rank;
+
+        let mut state = GameState::new(Uuid::nil(), "sheepshead".into(), 5, 0);
+        state.phase = GamePhase::Playing;
+        state.training_mode = true;
+        state.current_player = 1;
+
+        // Give seat 1 one plain-clubs card and one non-clubs card.
+        let clubs_card = Card::new(Suit::Clubs, Rank::Ace);
+        let spades_card = Card::new(Suit::Spades, Rank::King);
+        state.hands[1] = vec![clubs_card, spades_card];
+
+        // Build a trick that was led with a clubs card (plain suit, not trump).
+        // In Sheepshead, A♣ is a plain-suit clubs card (clubs Ace is not trump).
+        // Seat 0 led a plain clubs card.
+        let mut trick = Trick::new(0);
+        trick.plays.push((0, Card::new(Suit::Clubs, Rank::Nine)));
+        state.current_trick = Some(trick);
+
+        // Set a default meta so sheepshead meta is accessible
+        state.meta = GameMeta::Sheepshead(SheepsheadMeta {
+            picker: None,
+            sub_phase: "done".into(),
+            passed: 0,
+            leaster: false,
+            buried: vec![],
+            callable_suits: vec![],
+            called_suit: None,
+            going_alone: false,
+            partner: None,
+        });
+
+        let view = state.redacted_for(1, &Sheepshead);
+        // Seat 1 must follow clubs; only clubs_card is legal.
+        assert_eq!(view.legal_cards.len(), 1);
+        assert_eq!(view.legal_cards[0], clubs_card);
+    }
+
+    #[test]
+    fn redacted_for_clears_legal_cards_outside_playing_phase() {
+        let mut state = GameState::new(Uuid::nil(), "mock".into(), 3, 0);
+        state.phase = GamePhase::Bidding;
+        state.training_mode = true;
+        let c = Card::new(Suit::Clubs, Rank::Ace);
+        state.hands = vec![vec![c]; 3];
+        let game = MockGame { visible: vec![] };
+
+        let view = state.redacted_for(0, &game);
+        assert!(
+            view.legal_cards.is_empty(),
+            "legal_cards must be empty when not in Playing phase"
+        );
+    }
+
+    #[test]
+    fn redacted_for_spectator_clears_training_fields() {
+        let mut state = playing_training_state(0);
+        state.hint_enabled = true;
+        state.hint = Some(HintCard {
+            card: Card::new(Suit::Clubs, Rank::Ace),
+            reason: "test reason".into(),
+        });
+        state.legal_cards = vec![Card::new(Suit::Clubs, Rank::Ace)];
+
+        let view = state.redacted_for_spectator();
+        assert!(view.legal_cards.is_empty(), "spectator view clears legal_cards");
+        assert!(view.hint.is_none(), "spectator view clears hint");
+        // All hands are cleared too
+        for hand in &view.hands {
+            assert!(hand.is_empty());
+        }
+    }
+
     #[test]
     fn redacted_for_preserves_meta_and_other_fields() {
         let mut state = populated_state();

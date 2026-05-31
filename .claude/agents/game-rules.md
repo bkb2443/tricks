@@ -55,12 +55,37 @@ Each new game must include unit tests for: deck size, dealing invariants, legal-
 
 Bot decisions in `bot.rs` use a `BotState` struct derived fresh from `GameState` each decision — no persistent bot state between decisions. The bot calls the same `Game` trait methods (`trump_rank`, `card_points`, `legal_plays`, `effective_suit`, `plain_suit_rank`) that the engine uses.
 
+## Test Requirements
+
+Tests are mandatory. Write them alongside the implementation — not after.
+
+**Every new `Game` trait method implementation, bot decision function, and tutorial hand definition must have at least one test.**
+
+For tutorial hands, test:
+- Total card count is correct (no over- or under-dealing)
+- No duplicate cards across hands + extra pile
+- Picking/calling rules satisfied (e.g. picker has sufficient trump, callable suits are valid)
+
+For `hint_reason`, test:
+- Each distinct situation category (leading as picker, leading as defender, following team-winning, following team-losing) returns the right string constant
+
+For bot logic:
+- Every new decision branch must have a test that exercises it
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // tests in the same file as the code they test
+}
+```
+
+No behavior change without a regression test. No new behavior without a new test.
+
 ## Coding Standards
 
 - Server rejects illegal moves with typed errors — never silently coerce or fall back
 - `thiserror`-derived error enums, not `Result<_, String>`. Existing code may still use `String` errors at trait boundaries — migrate when you touch those methods.
-- Every game rule change needs a test; no behavior change without a regression test
-- New game implementations must test: deck size, dealing invariants, legal-play enforcement, trick-winner correctness, and scoring across all branches (regular win, schneider, leaster, partner cases where applicable)
 
 ## Commands
 

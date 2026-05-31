@@ -50,10 +50,29 @@ cargo clippy -- -D warnings
 cargo fmt
 ```
 
+## Test Requirements
+
+Tests are part of the deliverable — not optional, not deferred. Write tests alongside implementation.
+
+**Every new public function, REST endpoint, WebSocket handler, or non-trivial method must have at least one `#[test]` in the same file.** If you add code with no tests, QA and review will fail.
+
+Test what matters: edge cases, error branches, state transitions. Do not test trivial getters.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // tests go here — same file as the code they test
+}
+```
+
+For room/session logic: compose with `tokio::sync::mpsc::channel`, not live WebSockets.
+
 ## Output Contract
 
 When dispatched, report back:
 1. Files changed (exact paths)
 2. Summary of what changed and why
 3. Test results: `cargo test` and `cargo clippy -- -D warnings` output
-4. Warnings: any breaking `Game` trait changes that affect game implementations, or protocol changes that require client-side updates
+4. Test coverage: list every new public function and confirm it has at least one test
+5. Warnings: any breaking `Game` trait changes that affect game implementations, or protocol changes that require client-side updates

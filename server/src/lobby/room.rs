@@ -1184,6 +1184,21 @@ mod tests {
         ))
     }
 
+    fn make_training_room() -> Arc<Room> {
+        let game = games::get_game("sheepshead").unwrap();
+        Arc::new(Room::new(
+            Uuid::new_v4(),
+            "sheepshead".into(),
+            5,
+            game,
+            24,
+            "TEST-TRN".into(),
+            "private".into(),
+            true,   // training_mode
+            None,   // tutorial_id
+        ))
+    }
+
     #[test]
     fn join_lobby_claims_seat() {
         let room = make_room();
@@ -1215,5 +1230,69 @@ mod tests {
         assert!(room.handle_lobby_chat(0, "hello".into()).is_ok());
         assert!(room.handle_lobby_chat(0, "".into()).is_err());
         assert!(room.handle_lobby_chat(0, "x".repeat(201)).is_err());
+    }
+
+    // ── training mode ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn toggle_hint_no_op_when_not_training_mode() {
+        let room = make_room();
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        room.join_lobby("Alice".into(), Uuid::new_v4(), tx).unwrap();
+        // Fill remaining seats with bots and start the game.
+        room.fill_bots();
+        room.start_game_inner();
+
+        // hint_enabled should start false in a non-training room.
+        {
+            let guard = room.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(!state.hint_enabled, "hint_enabled should start false");
+        }
+
+        // Calling toggle_hint should be a no-op when training_mode is false.
+        room.toggle_hint(0);
+
+        {
+            let guard = room.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(
+                !state.hint_enabled,
+                "toggle_hint must not flip hint_enabled outside training mode"
+            );
+        }
+    }
+
+    #[test]
+    fn toggle_hint_flips_in_training_mode() {
+        let room = make_training_room();
+        let (tx, _rx) = tokio::sync::mpsc::channel(16);
+        room.join_lobby("Alice".into(), Uuid::new_v4(), tx).unwrap();
+        // Fill remaining seats with bots and start the game.
+        room.fill_bots();
+        room.start_game_inner();
+
+        // Verify initial state: hint_enabled = false.
+        {
+            let guard = room.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(!state.hint_enabled, "hint_enabled should start false");
+        }
+
+        // First toggle: false → true.
+        room.toggle_hint(0);
+        {
+            let guard = room.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(state.hint_enabled, "after first toggle hint_enabled should be true");
+        }
+
+        // Second toggle: true → false.
+        room.toggle_hint(0);
+        {
+            let guard = room.state.lock().unwrap();
+            let state = guard.as_ref().unwrap();
+            assert!(!state.hint_enabled, "after second toggle hint_enabled should be false again");
+        }
     }
 }

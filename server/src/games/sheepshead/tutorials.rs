@@ -273,3 +273,59 @@ static TUTORIALS: [TutorialHand; 3] = [
 pub fn all() -> &'static [TutorialHand] {
     &TUTORIALS
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::Card;
+    use std::collections::HashSet;
+
+    fn all_cards_in_tutorial(tutorial: &crate::engine::tutorial::TutorialHand) -> Vec<Card> {
+        let mut cards = Vec::new();
+        for hand in tutorial.hands {
+            for &(suit, rank) in *hand {
+                cards.push(Card::new(suit, rank));
+            }
+        }
+        for &(suit, rank) in tutorial.extra_pile {
+            cards.push(Card::new(suit, rank));
+        }
+        cards
+    }
+
+    fn assert_no_duplicates(tutorial: &crate::engine::tutorial::TutorialHand, name: &str) {
+        let cards = all_cards_in_tutorial(tutorial);
+        let mut seen = HashSet::new();
+        for c in &cards {
+            assert!(seen.insert(*c), "{name}: duplicate card {c}");
+        }
+    }
+
+    #[test]
+    fn picking_hand_has_32_cards_no_duplicates() {
+        let picking = &all()[0]; // sheepshead-picking
+        assert_eq!(all_cards_in_tutorial(picking).len(), 32);
+        assert_no_duplicates(picking, "picking");
+    }
+
+    #[test]
+    fn partner_hand_has_32_cards_no_duplicates() {
+        let partner = &all()[1]; // sheepshead-partner
+        assert_eq!(all_cards_in_tutorial(partner).len(), 32);
+        assert_no_duplicates(partner, "partner");
+    }
+
+    #[test]
+    fn leaster_hand_has_32_cards_no_duplicates() {
+        let leaster = &all()[2]; // sheepshead-leaster
+        assert_eq!(all_cards_in_tutorial(leaster).len(), 32);
+        assert_no_duplicates(leaster, "leaster");
+    }
+
+    #[test]
+    fn all_tutorials_have_nonzero_steps() {
+        for t in all() {
+            assert!(!t.steps.is_empty(), "{} has no steps", t.id);
+        }
+    }
+}

@@ -1578,6 +1578,86 @@ mod tests {
         );
     }
 
+    // ── hint_reason tests ────────────────────────────────────────────────────
+
+    /// Build a Playing-phase state with picker=0, caller provided can adjust fields.
+    fn state_with_picker(picker: usize) -> GameState {
+        let mut state = GameState::new(Uuid::nil(), "sheepshead".into(), 5, 0);
+        state.phase = GamePhase::Playing;
+        state.current_player = picker;
+        state.meta = make_sheepshead_meta(
+            Some(picker),
+            "done",
+            0,
+            false,
+            Some("clubs"),
+            None,
+            false,
+            vec![],
+            vec![],
+        );
+        // Give each seat some cards
+        let seven_hearts = Card::new(Suit::Hearts, Rank::Seven);
+        state.hands = vec![vec![seven_hearts]; 5];
+        state
+    }
+
+    #[test]
+    fn hint_reason_picker_leading_trump() {
+        let state = state_with_picker(0);
+        // Q♣ is trump (highest trump in Sheepshead)
+        let trump_card = Card::new(Suit::Clubs, Rank::Queen);
+        // Picker (seat 0) is leading (no current trick)
+        let reason = Sheepshead.hint_reason(trump_card, &state, 0);
+        assert!(
+            reason.to_lowercase().contains("trump"),
+            "hint for picker leading trump should mention 'trump', got: {reason}"
+        );
+    }
+
+    #[test]
+    fn hint_reason_defender_leading_ace() {
+        let state = state_with_picker(0);
+        // Seat 1 is a defender; they are leading (trick is None → leading)
+        let ace_clubs = Card::new(Suit::Clubs, Rank::Ace);
+        // ace_clubs is a plain suit card (Clubs Ace is not trump in Sheepshead)
+        let reason = Sheepshead.hint_reason(ace_clubs, &state, 1);
+        assert!(
+            !reason.is_empty(),
+            "hint_reason must return a non-empty string for a defender leading an ace"
+        );
+    }
+
+    #[test]
+    fn hint_reason_team_winning_dump_points() {
+        let mut state = state_with_picker(0);
+        // Set up a trick where picker (seat 0) is already winning with Q♣.
+        let queen_clubs = Card::new(Suit::Clubs, Rank::Queen);
+        let mut trick = Trick::new(0);
+        trick.plays.push((0, queen_clubs)); // picker led Q♣ (trump, winning)
+        state.current_trick = Some(trick);
+        state.current_player = 1; // seat 1 is following
+
+        // Seat 1 is a defender following into a trick the picker is winning.
+        // Playing a fail card means "teammate is winning" context doesn't apply
+        // (seat 1 is not on picker's team), but the hint should produce a non-empty string.
+        let fail_card = Card::new(Suit::Hearts, Rank::Seven); // plain fail card
+        let reason = Sheepshead.hint_reason(fail_card, &state, 1);
+        assert!(
+            !reason.is_empty(),
+            "hint_reason must return a non-empty string when following; got empty string"
+        );
+
+        // Now test from the picker's own perspective on a trick where picker is winning.
+        // No partner is set, so teammate lookup returns None — falls into i_am_winning path.
+        state.current_player = 0;
+        let reason_picker = Sheepshead.hint_reason(fail_card, &state, 0);
+        assert!(
+            !reason_picker.is_empty(),
+            "hint_reason must return a non-empty string for picker following their own winning trick"
+        );
+    }
+
     #[test]
     fn call_ace_picker_holds_is_rejected() {
         let (mut state, picker) = calling_state();

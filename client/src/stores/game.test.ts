@@ -341,4 +341,41 @@ describe('game store', () => {
     expect(store.gameState).toBeNull()
     expect(store.isSolo).toBe(false)
   })
+
+  // ── tutorial_narration handling ─────────────────────────────────────────────
+
+  describe('tutorial_narration handling', () => {
+    it('sets trainingNarration when tutorial_narration message arrives', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Lead trump to draw defenders.' })
+      expect(store.trainingNarration).toBe('Lead trump to draw defenders.')
+    })
+
+    it('appends to tutorialNarrationHistory on each narration', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'First.' })
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Second.' })
+      expect(store.tutorialNarrationHistory).toEqual(['First.', 'Second.'])
+    })
+
+    it('isTraining is false when training_mode is false', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'snapshot', state: makeState({ training_mode: false }) })
+      expect(store.isTraining).toBe(false)
+    })
+
+    it('isTraining is true when training_mode is true', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'snapshot', state: makeState({ training_mode: true }) })
+      expect(store.isTraining).toBe(true)
+    })
+
+    it('reset clears trainingNarration and history', () => {
+      const store = useGameStore()
+      store.handleUpdate({ type: 'tutorial_narration', text: 'Something.' })
+      store.reset()
+      expect(store.trainingNarration).toBeNull()
+      expect(store.tutorialNarrationHistory).toEqual([])
+    })
+  })
 })
