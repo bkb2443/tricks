@@ -93,7 +93,9 @@ async fn handle_socket(socket: WebSocket, lobby: Arc<Lobby>) {
                 c.room.on_disconnect(seat, c.ws_id);
             } else {
                 let room = Arc::clone(&c.room);
-                tokio::spawn(async move { room.on_disconnect(seat, c.ws_id); });
+                tokio::spawn(async move {
+                    room.on_disconnect(seat, c.ws_id);
+                });
             }
         } else {
             c.room.on_spectator_disconnect(c.ws_id);
@@ -147,7 +149,13 @@ fn route(
                         room_arc.fill_bots();
                         room_arc.start_game();
                     }
-                    *ctx = Some(PlayerCtx { seat: Some(seat), name: None, ws_id, room, broadcast_rx });
+                    *ctx = Some(PlayerCtx {
+                        seat: Some(seat),
+                        name: None,
+                        ws_id,
+                        room,
+                        broadcast_rx,
+                    });
                     Some(reply)
                 }
                 None => Some(StateUpdate::Error {
@@ -180,8 +188,18 @@ fn route(
             }
             match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code: code };
-                    *ctx = Some(PlayerCtx { seat: Some(seat), name: Some(name), ws_id, room, broadcast_rx });
+                    let reply = StateUpdate::JoinedRoom {
+                        room_id: room.id,
+                        seat,
+                        room_code: code,
+                    };
+                    *ctx = Some(PlayerCtx {
+                        seat: Some(seat),
+                        name: Some(name),
+                        ws_id,
+                        room,
+                        broadcast_rx,
+                    });
                     Some(reply)
                 }
                 None => Some(StateUpdate::Error {
@@ -207,8 +225,18 @@ fn route(
             };
             match room.join_lobby(name.clone(), ws_id, player_tx.clone()) {
                 Some((seat, broadcast_rx)) => {
-                    let reply = StateUpdate::JoinedRoom { room_id: room.id, seat, room_code };
-                    *ctx = Some(PlayerCtx { seat: Some(seat), name: Some(name), ws_id, room, broadcast_rx });
+                    let reply = StateUpdate::JoinedRoom {
+                        room_id: room.id,
+                        seat,
+                        room_code,
+                    };
+                    *ctx = Some(PlayerCtx {
+                        seat: Some(seat),
+                        name: Some(name),
+                        ws_id,
+                        room,
+                        broadcast_rx,
+                    });
                     Some(reply)
                 }
                 None => Some(StateUpdate::Error {
@@ -220,17 +248,30 @@ fn route(
         // ── Spectate: join as observer, no seat ───────────────────────────────
         ClientMessage::Spectate { name, room_code } => {
             if ctx.is_some() {
-                return Some(StateUpdate::Error { message: "already in a room".into() });
+                return Some(StateUpdate::Error {
+                    message: "already in a room".into(),
+                });
             }
             let room = match lobby.get_room(&room_code) {
                 Some(r) => r,
-                None => return Some(StateUpdate::Error {
-                    message: format!("room '{room_code}' not found"),
-                }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: format!("room '{room_code}' not found"),
+                    });
+                }
             };
             let broadcast_rx = room.join_as_spectator(ws_id, player_tx.clone());
-            let reply = StateUpdate::JoinedAsSpectator { room_id: room.id, room_code };
-            *ctx = Some(PlayerCtx { seat: None, name: Some(name), ws_id, room, broadcast_rx });
+            let reply = StateUpdate::JoinedAsSpectator {
+                room_id: room.id,
+                room_code,
+            };
+            *ctx = Some(PlayerCtx {
+                seat: None,
+                name: Some(name),
+                ws_id,
+                room,
+                broadcast_rx,
+            });
             Some(reply)
         }
 
@@ -239,7 +280,11 @@ fn route(
             let c = ctx.as_ref()?;
             let seat = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot perform game actions".into(),
+                    });
+                }
             };
             match c.room.apply_bid(seat, value) {
                 Ok(()) => {
@@ -255,7 +300,11 @@ fn route(
             let c = ctx.as_ref()?;
             let seat = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot perform game actions".into(),
+                    });
+                }
             };
             match c.room.play_card(seat, card) {
                 Ok(()) => {
@@ -272,7 +321,11 @@ fn route(
             let c = ctx.as_ref()?;
             let seat = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot send chat".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot send chat".into(),
+                    });
+                }
             };
             match c.room.handle_lobby_chat(seat, text) {
                 Ok(()) => None,
@@ -283,7 +336,9 @@ fn route(
         ClientMessage::StartGame => {
             let c = ctx.as_ref()?;
             if c.seat.is_none() {
-                return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() });
+                return Some(StateUpdate::Error {
+                    message: "spectators cannot perform game actions".into(),
+                });
             }
             let room = Arc::clone(&c.room);
             room.start_game();
@@ -294,7 +349,11 @@ fn route(
             let c = ctx.as_ref()?;
             let requester = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot perform game actions".into(),
+                    });
+                }
             };
             match c.room.force_bot(seat, requester) {
                 Ok(()) => None,
@@ -306,7 +365,11 @@ fn route(
             let c = ctx.as_ref()?;
             let requester = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot perform game actions".into(),
+                    });
+                }
             };
             match c.room.extend_rejoin(seat, requester) {
                 Ok(()) => None,
@@ -319,7 +382,11 @@ fn route(
             let c = ctx.as_ref()?;
             let seat = match c.seat {
                 Some(s) => s,
-                None => return Some(StateUpdate::Error { message: "spectators cannot perform game actions".into() }),
+                None => {
+                    return Some(StateUpdate::Error {
+                        message: "spectators cannot perform game actions".into(),
+                    });
+                }
             };
             match c.room.start_next_hand_dealer(seat) {
                 Ok(()) => {

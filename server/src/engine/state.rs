@@ -216,7 +216,10 @@ pub enum StateUpdate {
         room_code: String,
     },
     /// Sent immediately after a successful Spectate. No seat assigned.
-    JoinedAsSpectator { room_id: Uuid, room_code: String },
+    JoinedAsSpectator {
+        room_id: Uuid,
+        room_code: String,
+    },
     /// Full state snapshot sent once dealing is complete. Only `hands[seat]` is
     /// populated; other hands are empty. `extra_piles` is also cleared (blind is hidden).
     Snapshot {
