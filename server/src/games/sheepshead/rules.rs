@@ -283,12 +283,24 @@ impl Game for Sheepshead {
         crate::games::sheepshead::tutorials::all()
     }
 
-    fn hint_reason(&self, card: crate::engine::Card, state: &crate::engine::GameState, seat: usize) -> &'static str {
+    fn hint_reason(
+        &self,
+        card: crate::engine::Card,
+        state: &crate::engine::GameState,
+        seat: usize,
+    ) -> &'static str {
         use crate::engine::GameMeta;
 
         let is_trump = self.trump_rank(card, state).is_some();
-        let is_leading = state.current_trick.as_ref().is_none_or(|t| t.plays.is_empty());
-        let picker = if let GameMeta::Sheepshead(ref m) = state.meta { m.picker } else { None };
+        let is_leading = state
+            .current_trick
+            .as_ref()
+            .is_none_or(|t| t.plays.is_empty());
+        let picker = if let GameMeta::Sheepshead(ref m) = state.meta {
+            m.picker
+        } else {
+            None
+        };
         let is_picker = picker == Some(seat);
 
         if is_leading {
@@ -312,7 +324,11 @@ impl Game for Sheepshead {
                 None => return "",
             };
             let winner_seat = crate::bot::current_winner(trick, self, state);
-            let partner = if let GameMeta::Sheepshead(ref m) = state.meta { m.partner } else { None };
+            let partner = if let GameMeta::Sheepshead(ref m) = state.meta {
+                m.partner
+            } else {
+                None
+            };
             let teammate = if is_picker { partner } else { picker };
             let team_winning = winner_seat == seat || teammate == Some(winner_seat);
             let i_am_winning = winner_seat == seat;

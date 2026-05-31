@@ -1,5 +1,5 @@
-use crate::engine::tutorial::{TutorialHand, TutorialStep, StepTrigger};
-use crate::engine::{Suit, Rank};
+use crate::engine::tutorial::{StepTrigger, TutorialHand, TutorialStep};
+use crate::engine::{Rank, Suit};
 
 // ---------------------------------------------------------------------------
 // All Sheepshead tutorials
@@ -61,10 +61,7 @@ static TUTORIALS: [TutorialHand; 3] = [
             ],
         ],
         // Blind: K♣ 10♥
-        extra_pile: &[
-            (Suit::Clubs, Rank::King),
-            (Suit::Hearts, Rank::Ten),
-        ],
+        extra_pile: &[(Suit::Clubs, Rank::King), (Suit::Hearts, Rank::Ten)],
         steps: &[
             TutorialStep {
                 trigger: StepTrigger::PlayerTurn { phase: "picking" },
@@ -83,7 +80,10 @@ static TUTORIALS: [TutorialHand; 3] = [
                 narration: "Your Q\u{2663} \u{2014} the highest card in Sheepshead \u{2014} took trick 1 along with all the trump others were forced to play. Stripping trump from defenders weakens them for later tricks.",
             },
             TutorialStep {
-                trigger: StepTrigger::BotActed { seat: 2, trick_index: 2 },
+                trigger: StepTrigger::BotActed {
+                    seat: 2,
+                    trick_index: 2,
+                },
                 narration: "Seat 2 just played A\u{2663} \u{2014} that\u{2019}s the called ace! Seat 2 is now revealed as your partner. Watch for opportunities to dump high-point cards onto tricks they\u{2019}re winning.",
             },
             TutorialStep {
@@ -151,10 +151,7 @@ static TUTORIALS: [TutorialHand; 3] = [
             ],
         ],
         // Blind: 10♦ 8♥
-        extra_pile: &[
-            (Suit::Diamonds, Rank::Ten),
-            (Suit::Hearts, Rank::Eight),
-        ],
+        extra_pile: &[(Suit::Diamonds, Rank::Ten), (Suit::Hearts, Rank::Eight)],
         steps: &[
             TutorialStep {
                 trigger: StepTrigger::PlayerTurn { phase: "picking" },
@@ -169,7 +166,10 @@ static TUTORIALS: [TutorialHand; 3] = [
                 narration: "You\u{2019}re a defender for now \u{2014} your identity is secret. Play safe fail cards to dump zero-point cards. Hold A\u{2663} until a trick where the picker is already winning, then play it to score big points for your team.",
             },
             TutorialStep {
-                trigger: StepTrigger::BotActed { seat: 2, trick_index: 2 },
+                trigger: StepTrigger::BotActed {
+                    seat: 2,
+                    trick_index: 2,
+                },
                 narration: "Seat 2 (picker) is winning this trick. Now is a good moment to play A\u{2663} \u{2014} you\u{2019}ll reveal yourself as the partner AND load the trick with 11 points for your team.",
             },
             TutorialStep {
@@ -237,10 +237,7 @@ static TUTORIALS: [TutorialHand; 3] = [
             ],
         ],
         // Blind (unused in leaster): Q♣ J♣
-        extra_pile: &[
-            (Suit::Clubs, Rank::Queen),
-            (Suit::Clubs, Rank::Jack),
-        ],
+        extra_pile: &[(Suit::Clubs, Rank::Queen), (Suit::Clubs, Rank::Jack)],
         steps: &[
             TutorialStep {
                 trigger: StepTrigger::PlayerTurn { phase: "picking" },

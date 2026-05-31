@@ -552,8 +552,8 @@ mod tests {
     #[test]
     fn redacted_for_populates_legal_cards_mid_trick() {
         // Use the real Sheepshead game so legal_plays enforces suit-following.
-        use crate::games::sheepshead::Sheepshead;
         use crate::engine::Rank;
+        use crate::games::sheepshead::Sheepshead;
 
         let mut state = GameState::new(Uuid::nil(), "sheepshead".into(), 5, 0);
         state.phase = GamePhase::Playing;
@@ -618,7 +618,10 @@ mod tests {
         state.legal_cards = vec![Card::new(Suit::Clubs, Rank::Ace)];
 
         let view = state.redacted_for_spectator();
-        assert!(view.legal_cards.is_empty(), "spectator view clears legal_cards");
+        assert!(
+            view.legal_cards.is_empty(),
+            "spectator view clears legal_cards"
+        );
         assert!(view.hint.is_none(), "spectator view clears hint");
         // All hands are cleared too
         for hand in &view.hands {

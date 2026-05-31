@@ -1,5 +1,5 @@
-use crate::engine::tutorial::{TutorialHand, TutorialStep, StepTrigger};
-use crate::engine::{Suit, Rank};
+use crate::engine::tutorial::{StepTrigger, TutorialHand, TutorialStep};
+use crate::engine::{Rank, Suit};
 
 // ---------------------------------------------------------------------------
 // All Euchre tutorials
@@ -189,14 +189,22 @@ mod tests {
     #[test]
     fn calling_trump_has_24_cards_no_duplicates() {
         let tutorial = &all()[0]; // euchre-calling-trump
-        assert_eq!(all_cards_in_tutorial(tutorial).len(), 24, "Euchre uses a 24-card deck");
+        assert_eq!(
+            all_cards_in_tutorial(tutorial).len(),
+            24,
+            "Euchre uses a 24-card deck"
+        );
         assert_no_duplicates(tutorial, "calling-trump");
     }
 
     #[test]
     fn going_alone_has_24_cards_no_duplicates() {
         let tutorial = &all()[1]; // euchre-going-alone
-        assert_eq!(all_cards_in_tutorial(tutorial).len(), 24, "Euchre uses a 24-card deck");
+        assert_eq!(
+            all_cards_in_tutorial(tutorial).len(),
+            24,
+            "Euchre uses a 24-card deck"
+        );
         assert_no_duplicates(tutorial, "going-alone");
     }
 

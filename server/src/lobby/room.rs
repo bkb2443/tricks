@@ -1194,8 +1194,8 @@ mod tests {
             24,
             "TEST-TRN".into(),
             "private".into(),
-            true,   // training_mode
-            None,   // tutorial_id
+            true, // training_mode
+            None, // tutorial_id
         ))
     }
 
@@ -1284,7 +1284,10 @@ mod tests {
         {
             let guard = room.state.lock().unwrap();
             let state = guard.as_ref().unwrap();
-            assert!(state.hint_enabled, "after first toggle hint_enabled should be true");
+            assert!(
+                state.hint_enabled,
+                "after first toggle hint_enabled should be true"
+            );
         }
 
         // Second toggle: true → false.
@@ -1292,7 +1295,10 @@ mod tests {
         {
             let guard = room.state.lock().unwrap();
             let state = guard.as_ref().unwrap();
-            assert!(!state.hint_enabled, "after second toggle hint_enabled should be false again");
+            assert!(
+                !state.hint_enabled,
+                "after second toggle hint_enabled should be false again"
+            );
         }
     }
 }

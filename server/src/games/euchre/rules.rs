@@ -301,11 +301,19 @@ impl Game for Euchre {
         crate::games::euchre::tutorials::all()
     }
 
-    fn hint_reason(&self, card: crate::engine::Card, state: &crate::engine::GameState, seat: usize) -> &'static str {
+    fn hint_reason(
+        &self,
+        card: crate::engine::Card,
+        state: &crate::engine::GameState,
+        seat: usize,
+    ) -> &'static str {
         use crate::engine::GameMeta;
 
         let is_trump = self.trump_rank(card, state).is_some();
-        let is_leading = state.current_trick.as_ref().is_none_or(|t| t.plays.is_empty());
+        let is_leading = state
+            .current_trick
+            .as_ref()
+            .is_none_or(|t| t.plays.is_empty());
 
         let is_maker = if let GameMeta::Euchre(ref m) = state.meta {
             m.caller_seat == Some(seat)
