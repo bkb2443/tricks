@@ -17,6 +17,13 @@ MAX_RUN_MINUTES=90
 
 ### Setup
 
+Sync local with remote before doing anything:
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
 Record start time and fetch issues:
 
 ```bash
@@ -60,7 +67,55 @@ If **YES**: proceed to Step 2.
 
 ---
 
-**Step 2 — Add `in-progress` label**
+**Step 2 — Check for existing open PR**
+
+```bash
+gh pr list --state open --search "fixes #[number]" --json number,title,isDraft,headRefName,url
+```
+
+Also check:
+```bash
+gh pr list --state open --head "issue-[number]-*" --json number,title,isDraft,headRefName,url
+```
+
+**If an open PR exists → go to Step 2a (resume existing PR). Skip Steps 2b–5.**
+
+**If no open PR exists → go to Step 2b (fresh start).**
+
+---
+
+**Step 2a — Resume existing PR (open or draft)**
+
+Check out the branch and sync it:
+
+```bash
+git fetch origin
+git checkout [headRefName]
+git rebase origin/main
+```
+
+If rebase has conflicts, resolve them:
+- For each conflict, choose the version that best matches the issue spec
+- Stage resolved files with `git add`
+- Continue: `git rebase --continue`
+
+Push the rebased branch:
+
+```bash
+git push --force-with-lease origin [headRefName]
+```
+
+Then proceed directly to **Step 6 (QA)**.
+
+After QA + review pass (Step 8a), if the PR is a draft, mark it ready:
+
+```bash
+gh pr ready [pr-number]
+```
+
+---
+
+**Step 2b — Add `in-progress` label**
 
 ```bash
 gh issue edit [number] --add-label in-progress
@@ -68,7 +123,7 @@ gh issue edit [number] --add-label in-progress
 
 ---
 
-**Step 3 — Create worktree**
+**Step 3 — Create worktree** *(fresh start only — skip if resuming via Step 2a)*
 
 Use the `superpowers:using-git-worktrees` skill to create an isolated worktree.
 Name the branch: `issue-[number]-[kebab-case-title-slug]`
@@ -125,6 +180,14 @@ Prompt: "Review the changes made to implement issue #[number]: [title]. Run `git
 
 **Step 8a — On pass (QA passes AND review passes)**
 
+If resuming an existing PR (came through Step 2a):
+```bash
+# branch already pushed in Step 2a; just mark ready if it was a draft
+gh pr ready [pr-number]   # no-op if already ready
+gh issue edit [number] --remove-label ready --remove-label in-progress
+```
+
+If fresh start (came through Step 2b):
 ```bash
 git push -u origin issue-[number]-[slug]
 
@@ -146,6 +209,23 @@ Increment `issues_completed`.
 
 **Step 8b — On fail (QA fails OR review has critical/major findings)**
 
+If resuming an existing PR (came through Step 2a):
+```bash
+# branch already pushed; leave as draft (or convert to draft if it wasn't)
+gh pr edit [pr-number] --draft --body "$(cat <<'EOF'
+Fixes #[number]
+
+Attempted by implement-issues routine. Draft — see failures below.
+
+## Failures
+
+[Paste the full verbatim output from the QA agent and/or reviewer agent — do not paraphrase or summarize]
+EOF
+)"
+gh issue edit [number] --remove-label in-progress
+```
+
+If fresh start (came through Step 2b):
 ```bash
 git push -u origin issue-[number]-[slug]
 
