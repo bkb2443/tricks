@@ -288,9 +288,15 @@ impl Room {
         ws_id: Uuid,
         tx: mpsc::Sender<StateUpdate>,
     ) -> broadcast::Receiver<StateUpdate> {
-        self.spectators.lock().unwrap().push(SpectatorEntry { ws_id, tx: tx.clone() });
+        self.spectators.lock().unwrap().push(SpectatorEntry {
+            ws_id,
+            tx: tx.clone(),
+        });
 
-        let snapshot = self.state.lock().unwrap()
+        let snapshot = self
+            .state
+            .lock()
+            .unwrap()
             .as_ref()
             .map(|s| s.redacted_for_spectator());
         if let Some(state) = snapshot {
@@ -487,7 +493,9 @@ impl Room {
                 }
             }
             self.broadcast(self.seat_update());
-            self.system_chat(format!("{expected_name}'s hand has been taken over by a bot."));
+            self.system_chat(format!(
+                "{expected_name}'s hand has been taken over by a bot."
+            ));
         }
     }
 
@@ -906,7 +914,9 @@ impl Room {
             let spectator_view = state.redacted_for_spectator();
             let spectators = self.spectators.lock().unwrap();
             for s in spectators.iter() {
-                let _ = s.tx.try_send(StateUpdate::Snapshot { state: spectator_view.clone() });
+                let _ = s.tx.try_send(StateUpdate::Snapshot {
+                    state: spectator_view.clone(),
+                });
             }
         }
         *self.state.lock().unwrap() = Some(state);
